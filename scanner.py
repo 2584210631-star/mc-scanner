@@ -52,6 +52,9 @@ def parse_port_spec(spec: str) -> list[int]:
     return sorted(ports)
 
 
+MAX_TARGETS = 2_000_000  # 防止大网段 OOM
+
+
 def parse_targets(targets: list[str], default_ports: list[int] | None = None) -> list[tuple[str, int]]:
     """
     解析目标列表，支持以下格式：
@@ -62,7 +65,7 @@ def parse_targets(targets: list[str], default_ports: list[int] | None = None) ->
     - 主机名: "example.com"
     - 主机名:端口: "example.com:25566"
     如果目标不带端口，使用 default_ports 展开
-    返回 (ip, port) 列表
+    返回 (ip, port) 列表（超过 MAX_TARGETS 会截断并警告）
     """
     if default_ports is None:
         default_ports = [25565]
@@ -85,9 +88,13 @@ def parse_targets(targets: list[str], default_ports: list[int] | None = None) ->
         # 尝试解析为 CIDR 或 IP
         try:
             network = ipaddress.ip_network(addr_part, strict=False)
-            hosts = list(network.hosts())
-            if not hosts:
-                hosts = [network.network_address]
+            num_hosts = network.num_addresses - 2 if network.num_addresses > 2 else 1
+            est = num_hosts * (1 if port else len(default_ports))
+            if len(results) + est > MAX_TARGETS:
+                print(f"[!] 目标 {target} 约 {est} 个，超过上限 {MAX_TARGETS}，已跳过（请缩小网段）")
+                continue
+            # 直接迭代，不物化整个列表，避免大网段中间占用
+            hosts = network.hosts() if network.num_addresses > 2 else [network.network_address]
             for ip in hosts:
                 if port is not None:
                     results.append((str(ip), port))

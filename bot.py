@@ -181,6 +181,16 @@ def _send_chat_message_simple(conn: MCConnection, message: str, chat_id: int):
     conn.send_packet(chat_id, write_string(message[:256]))
 
 
+def _send_chat_command(conn: MCConnection, command: str, command_id: int):
+    """
+    发送聊天命令（1.19.3+，协议 761+）
+    命令不带斜杠，格式为纯 String
+    """
+    if command.startswith('/'):
+        command = command[1:]
+    conn.send_packet(command_id, write_string(command[:256]))
+
+
 def _handle_play_packets(conn: MCConnection, packets: dict, stop_event: threading.Event):
     """
     后台线程：处理 Play 阶段的 incoming 包
@@ -376,24 +386,39 @@ def join_and_warn(
         # ===== Configuration 阶段（仅 1.20.2+）=====
         config_ok = True
         if packets.get("has_configuration", False):
+            cfg = packets.get("config", {})
+            cb_finish = cfg.get("cb_finish", CONFIG_CB_FINISH_CONFIGURATION)
+            cb_known_packs = cfg.get("cb_known_packs", CONFIG_CB_KNOWN_PACKS)
+            cb_keep_alive = cfg.get("cb_keep_alive", CONFIG_CB_KEEP_ALIVE)
+            cb_ping = cfg.get("cb_ping", CONFIG_CB_PING)
+            cb_add_rp = cfg.get("cb_add_resource_pack", CONFIG_CB_ADD_RESOURCE_PACK)
+            cb_disconnect = cfg.get("cb_disconnect", CONFIG_CB_DISCONNECT)
+            sb_client_info = cfg.get("sb_client_info", CONFIG_SB_CLIENT_INFORMATION)
+            sb_plugin = cfg.get("sb_plugin", CONFIG_SB_PLUGIN_MESSAGE)
+            sb_finish = cfg.get("sb_finish", CONFIG_SB_FINISH_CONFIGURATION)
+            sb_known_packs = cfg.get("sb_known_packs", CONFIG_SB_KNOWN_PACKS)
+            sb_keep_alive = cfg.get("sb_keep_alive", CONFIG_SB_KEEP_ALIVE)
+            sb_pong = cfg.get("sb_pong", CONFIG_SB_PONG)
+            sb_rp = cfg.get("sb_resource_pack", CONFIG_SB_RESOURCE_PACK_RESPONSE)
+
             # 发送 Client Information
-            conn.send_packet(CONFIG_SB_CLIENT_INFORMATION, _build_client_information())
+            conn.send_packet(sb_client_info, _build_client_information())
 
             # 发送 brand
             brand_payload = write_string("minecraft:brand") + write_string("MCScanner")
-            conn.send_packet(CONFIG_SB_PLUGIN_MESSAGE, brand_payload)
+            conn.send_packet(sb_plugin, brand_payload)
 
             config_ok = False
             while conn.state == STATE_CONFIGURATION:
                 packet_id, data = conn.recv_packet(timeout=timeout)
                 buf = io.BytesIO(data)
 
-                if packet_id == CONFIG_CB_FINISH_CONFIGURATION:
-                    conn.send_packet(CONFIG_SB_FINISH_CONFIGURATION)
+                if packet_id == cb_finish:
+                    conn.send_packet(sb_finish)
                     conn.state = STATE_PLAY
                     config_ok = True
 
-                elif packet_id == CONFIG_CB_KNOWN_PACKS:
+                elif packet_id == cb_known_packs:
                     # 回显服务器发的 packs（关键！不能发空列表）
                     pack_count = read_varint_from_stream(buf)
                     response = write_varint(pack_count)
@@ -402,23 +427,23 @@ def join_and_warn(
                         pid = read_string_from_stream(buf)
                         ver = read_string_from_stream(buf)
                         response += write_string(ns) + write_string(pid) + write_string(ver)
-                    conn.send_packet(CONFIG_SB_KNOWN_PACKS, response)
+                    conn.send_packet(sb_known_packs, response)
 
-                elif packet_id == CONFIG_CB_KEEP_ALIVE:
+                elif packet_id == cb_keep_alive:
                     if len(data) >= 8:
-                        conn.send_packet(CONFIG_SB_KEEP_ALIVE, data[:8])
+                        conn.send_packet(sb_keep_alive, data[:8])
 
-                elif packet_id == CONFIG_CB_PING:
+                elif packet_id == cb_ping:
                     if len(data) >= 4:
-                        conn.send_packet(CONFIG_SB_PONG, data[:4])
+                        conn.send_packet(sb_pong, data[:4])
 
-                elif packet_id == CONFIG_CB_ADD_RESOURCE_PACK:
+                elif packet_id == cb_add_rp:
                     # 资源包，回复 accepted (3)
                     rp_uuid = read_uuid_from_stream(buf)
                     response = write_uuid(rp_uuid) + write_varint(3)
-                    conn.send_packet(CONFIG_SB_RESOURCE_PACK_RESPONSE, response)
+                    conn.send_packet(sb_rp, response)
 
-                elif packet_id == CONFIG_CB_DISCONNECT:
+                elif packet_id == cb_disconnect:
                     try:
                         reason = read_string_from_stream(buf)
                     except Exception:
@@ -469,14 +494,25 @@ def join_and_warn(
         # AuthMe 自动注册/登录
         if authme_password:
             try:
+                cmd_id = packets.get("sb_chat_command", packets["sb_chat"])
+                use_cmd = "sb_chat_command" in packets
                 # 先尝试登录（可能已注册）
-                send_chat(conn, f"/login {authme_password}", packets["sb_chat"])
+                if use_cmd:
+                    _send_chat_command(conn, f"/login {authme_password}", cmd_id)
+                else:
+                    send_chat(conn, f"/login {authme_password}", packets["sb_chat"])
                 time.sleep(0.5)
                 # 再尝试注册（新账号）
-                send_chat(conn, f"/register {authme_password} {authme_password}", packets["sb_chat"])
+                if use_cmd:
+                    _send_chat_command(conn, f"/register {authme_password} {authme_password}", cmd_id)
+                else:
+                    send_chat(conn, f"/register {authme_password} {authme_password}", packets["sb_chat"])
                 time.sleep(1.0)
                 # 再登录一次确保生效
-                send_chat(conn, f"/login {authme_password}", packets["sb_chat"])
+                if use_cmd:
+                    _send_chat_command(conn, f"/login {authme_password}", cmd_id)
+                else:
+                    send_chat(conn, f"/login {authme_password}", packets["sb_chat"])
                 time.sleep(0.5)
                 result.authme_used = True
             except Exception:

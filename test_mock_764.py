@@ -99,8 +99,8 @@ def run():
             buf = io.BytesIO(data)
             cnt = read_varint_from_stream(buf)
             print(f"[MOCK764] Known Packs回显: {cnt}个 (0x{pid:02x})")
-            # Finish
-            send_pkt(client, 0x03, b'', comp)
+            # Finish (真实764配置阶段finish=0x02)
+            send_pkt(client, 0x02, b'', comp)
             pid, _ = recv_pkt(st, comp)
             print(f"[MOCK764] Finish ACK (0x{pid:02x})")
 

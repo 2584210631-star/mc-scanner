@@ -91,7 +91,9 @@ python main.py warn -f targets.txt
 | 1.19.3 - 1.20.1 | 761-763 | 无 Configuration | 带签名 (761) |
 | 1.20.2 - 1.20.4 | 764-765 | Configuration 阶段 | 带签名 |
 | 1.20.5 - 1.20.6 | 766 | Configuration 阶段 | 新格式 |
-| 1.21 - 1.21.12 | 767-775 | Configuration 阶段 | 新格式 |
+| 1.21 / 1.21.1 | 767 | Configuration 阶段 | 新格式 |
+| 1.21.2 - 1.21.9 | 768-773 | Configuration 阶段 | 新格式 |
+| 1.21.10 - 1.21.12 | 774-775 | Configuration 阶段 | 新格式 |
 | 1.21.13+ | 776+ | Configuration 阶段 | 新格式 |
 
 ## ⚙️ 配置文件

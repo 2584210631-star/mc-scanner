@@ -564,8 +564,9 @@ function renderStats(s){
   const maxVer = verEntries.length?verEntries[0][1]:1;
   const verChart = verEntries.map(([v,c])=>{
     const pct = Math.round(c/maxVer*100);
+    const ev = esc(v);
     return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
-      <span style="width:120px;font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${v}">${v}</span>
+      <span style="width:120px;font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${ev}">${ev}</span>
       <div style="flex:1;background:#0a0c10;border-radius:4px;height:16px;overflow:hidden">
         <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#4ade80,#22c55e);border-radius:4px"></div>
       </div>
