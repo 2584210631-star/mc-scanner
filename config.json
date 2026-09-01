@@ -1,0 +1,18 @@
+{
+  "username": "SecurityBot",
+  "messages": [
+    "您好，我是安全扫描机器人，不会破坏您的服务器",
+    "检测到您的服务器处于离线模式(offline-mode)，攻击者可伪造任意用户名登录",
+    "建议在 server.properties 中设置 online-mode=true 以保护玩家账号",
+    "本消息为安全提醒，机器人将自动退出"
+  ],
+  "ports": [25565, 25566, 25567, 25568, 25569, 25570, 25575, 25580, 25585, 25590, 25595, 25600],
+  "scan_threads": 200,
+  "scan_timeout": 2.5,
+  "bot_threads": 10,
+  "bot_timeout": 12,
+  "message_delay": 0.8,
+  "retry_count": 1,
+  "output_format": "json",
+  "output_file": "results.json"
+}
