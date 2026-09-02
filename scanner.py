@@ -2,6 +2,7 @@
 端口扫描模块（加强版）
 支持 CIDR 网段、端口范围、多线程并发、结果去重、进度回调、可停止
 """
+import json
 import socket
 import ipaddress
 import threading
