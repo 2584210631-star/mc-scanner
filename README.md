@@ -130,7 +130,9 @@ python main.py bot 1.2.3.4:25565 -u MyBot -m "你好" --authme password
 | `--workers N` | 扫描线程数（覆盖配置） |
 | `--timeout N` | 扫描超时秒数（覆盖配置） |
 | `--rate N` | 每秒最大连接数（0=不限速） |
+| `--exclude 文件` | 排除列表文件（覆盖配置） |
 | `--no-auth` | 只 SLP 探测，不登录发消息 |
+| `--no-db` | 不写入数据库 |
 | `--bot-workers N` | 机器人线程数 |
 | `-u, --username` | 机器人用户名 |
 | `-m, --message` | 警告消息（可多次） |
@@ -155,7 +157,14 @@ python main.py bot 1.2.3.4:25565 -u MyBot -m "你好" --authme password
   "bot_threads": 10,
   "bot_timeout": 12,
   "message_delay": 0.8,
-  "retry_count": 1
+  "retry_count": 1,
+  "rate": 0,
+  "authme_password": "",
+  "exclude_file": "exclude.conf",
+  "db_path": null,
+  "auto_save_db": true,
+  "output_format": "json",
+  "output_file": "results.json"
 }
 ```
 

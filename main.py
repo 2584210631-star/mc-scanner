@@ -20,7 +20,9 @@ import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from scanner import parse_targets, scan_ports, get_open_ports, deduplicate_targets, parse_port_spec, count_targets, masscan_scan, has_masscan, scan_ports_auto
+from scanner import (parse_targets, scan_ports, get_open_ports, deduplicate_targets,
+                     parse_port_spec, count_targets, masscan_scan, has_masscan,
+                     scan_ports_auto, load_exclude_list, filter_excluded)
 from bot import join_and_warn, DEFAULT_WARNING_MESSAGES
 from mc_protocol import server_list_ping, get_version_name
 
@@ -38,8 +40,13 @@ DEFAULT_CONFIG = {
     "bot_timeout": 12,
     "message_delay": 0.8,
     "retry_count": 1,
+    "rate": 0,  # 每秒最大连接数，0=不限速
+    "authme_password": "",  # AuthMe密码，空字符串=自动生成，false=禁用
+    "exclude_file": "exclude.conf",  # 排除列表文件
+    "db_path": None,  # SQLite数据库路径，None=默认
     "output_format": "json",
     "output_file": None,
+    "auto_save_db": True,  # 扫描结果自动写入数据库
 }
 
 
@@ -130,6 +137,51 @@ def save_results(results, output_file: str, fmt: str = "json"):
 
 
 # ============================================================
+# 数据库保存
+# ============================================================
+def _save_results_to_db(results, cfg, args, source: str = "scan"):
+    """把扫描结果保存到 SQLite 数据库（自动去重更新）"""
+    if getattr(args, 'no_db', False) or not cfg.get('auto_save_db', True):
+        return
+    try:
+        import db as db_store
+        db_path = cfg.get('db_path') or db_store.default_db_path()
+        db_store.init_db(db_path)
+        records = []
+        for r in results:
+            if isinstance(r, dict):
+                info = r.get('info', {})
+                v = info.get('version', {}) if isinstance(info, dict) else {}
+                p = info.get('players', {}) if isinstance(info, dict) else {}
+                desc = info.get('description', '') if isinstance(info, dict) else ''
+                motd = desc.get('text', str(desc)) if isinstance(desc, dict) else str(desc)
+                records.append({
+                    'ip': r.get('ip'), 'port': r.get('port'),
+                    'version': v.get('name', ''), 'proto': v.get('protocol', 0),
+                    'motd': motd[:200], 'is_modded': 0,
+                    'players_online': p.get('online', 0), 'players_max': p.get('max', 0),
+                    'auth': 'unknown', 'ping_ms': None,
+                    'json': json.dumps(info, ensure_ascii=False)[:2000] if info else None,
+                })
+            else:
+                # BotResult
+                records.append({
+                    'ip': r.ip, 'port': r.port,
+                    'version': r.version_name, 'proto': r.protocol_version,
+                    'motd': r.motd[:200], 'is_modded': 0,
+                    'players_online': r.players_online, 'players_max': r.players_max,
+                    'auth': r.auth_mode, 'ping_ms': None,
+                    'json': json.dumps({'auth_mode': r.auth_mode, 'messages_sent': r.messages_sent,
+                                         'authme_used': r.authme_used, 'error': r.error}, ensure_ascii=False)[:2000],
+                })
+        if records:
+            n = db_store.upsert_many(db_path, records)
+            print(f"[*] 已保存 {n} 条记录到数据库: {db_path}")
+    except Exception as e:
+        print(f"[!] 数据库保存失败（不影响扫描结果）: {e}")
+
+
+# ============================================================
 # 统计汇总
 # ============================================================
 def print_summary(results, label: str = "扫描"):
@@ -162,7 +214,8 @@ def cmd_portscan(args, cfg):
         print("[!] 没有有效的目标"); return
 
     print(f"[*] 目标数: {len(targets)} | 端口: {cfg['ports']} | 线程: {cfg['scan_threads']}")
-    results = scan_ports(targets, max_workers=cfg['scan_threads'], timeout=cfg['scan_timeout'], show_progress=False)
+    results = scan_ports(targets, max_workers=cfg['scan_threads'], timeout=cfg['scan_timeout'],
+                         show_progress=False, rate=getattr(args, 'rate', 0))
     open_ports = get_open_ports(results)
 
     print(f"\n[*] 开放端口 ({len(open_ports)} 个):")
@@ -227,6 +280,7 @@ def cmd_scan(args, cfg):
 
     if args.output or cfg['output_file']:
         save_results(mc_servers, args.output or cfg['output_file'], cfg['output_format'])
+    _save_results_to_db(mc_servers, cfg, args, source="scan")
 
     return mc_servers
 
@@ -326,6 +380,7 @@ def cmd_warn(args, cfg):
 
     if args.output or cfg['output_file']:
         save_results(results, args.output or cfg['output_file'], cfg['output_format'])
+    _save_results_to_db(results, cfg, args, source="warn")
 
     return results
 
@@ -340,7 +395,16 @@ def _load_targets(args, cfg, default_ports=None):
         with open(target_file, 'r') as f:
             file_targets = [line.strip() for line in f if line.strip() and not line.startswith('#')]
         targets.extend(parse_targets(file_targets, default_ports=default_ports))
-    return deduplicate_targets(targets)
+    targets = deduplicate_targets(targets)
+    # 排除列表过滤
+    exclude_file = getattr(args, 'exclude', None) or cfg.get('exclude_file')
+    if exclude_file and os.path.exists(exclude_file):
+        exclude_nets = load_exclude_list(exclude_file)
+        before = len(targets)
+        targets = filter_excluded(targets, exclude_nets)
+        if before != len(targets):
+            print(f"[*] 排除列表过滤: {before} -> {len(targets)} (移除{before-len(targets)}个)")
+    return targets
 
 
 # ============================================================
@@ -359,26 +423,32 @@ def main():
     p1 = subparsers.add_parser('portscan', help='只扫描端口')
     p1.add_argument('targets', nargs='*', help='目标 IP/网段/主机名')
     p1.add_argument('-f', '--file', help='从文件读取目标')
+    p1.add_argument('--exclude', help='排除列表文件 (覆盖配置)')
+    p1.add_argument('--rate', type=int, default=0, help='每秒最大连接数 (0=不限速)')
     p1.add_argument('-o', '--output', help='结果输出文件')
 
     # scan
     p2 = subparsers.add_parser('scan', help='扫描端口并SLP探测')
     p2.add_argument('targets', nargs='*', help='目标 IP/网段/主机名')
     p2.add_argument('-f', '--file', help='从文件读取目标')
+    p2.add_argument('--exclude', help='排除列表文件 (覆盖配置)')
     p2.add_argument('--workers', type=int, help='扫描线程数 (覆盖配置)')
     p2.add_argument('--timeout', type=float, help='扫描超时秒数 (覆盖配置)')
     p2.add_argument('--rate', type=int, default=0, help='每秒最大连接数 (0=不限速)')
+    p2.add_argument('--no-db', action='store_true', help='不写入数据库')
     p2.add_argument('-o', '--output', help='结果输出文件')
 
     # warn
     p3 = subparsers.add_parser('warn', help='扫描并对离线服发送警告')
     p3.add_argument('targets', nargs='*', help='目标 IP/网段/主机名')
     p3.add_argument('-f', '--file', help='从文件读取目标')
+    p3.add_argument('--exclude', help='排除列表文件 (覆盖配置)')
     p3.add_argument('-u', '--username', help='机器人用户名 (覆盖配置)')
     p3.add_argument('-m', '--message', action='append', help='自定义警告消息 (可多次)')
     p3.add_argument('--message-file', help='从文件读取警告消息')
     p3.add_argument('--skip-portscan', action='store_true', help='跳过端口扫描直接连接')
     p3.add_argument('--no-auth', action='store_true', help='只SLP探测不登录发消息')
+    p3.add_argument('--no-db', action='store_true', help='不写入数据库')
     p3.add_argument('--workers', type=int, help='扫描线程数 (覆盖配置)')
     p3.add_argument('--timeout', type=float, help='扫描超时秒数 (覆盖配置)')
     p3.add_argument('--bot-workers', type=int, help='机器人线程数 (覆盖配置)')
