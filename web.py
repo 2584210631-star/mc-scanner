@@ -236,6 +236,7 @@ def run_scan(cfg):
                         "protocol_version": v.get('protocol', 0),
                         "players_online": p.get('online', 0),
                         "players_max": p.get('max', 0),
+                        "player_list": [pl.get('name','') for pl in p.get('sample', [])],
                         "motd": motd, "slp_ok": True,
                     })
                 else:
@@ -598,8 +599,8 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
 
         <div id="tabResults">
           <div class="filter-bar">
-            <input id="searchInput" placeholder="搜索 IP / 版本 / MOTD..." oninput="renderResults()" style="flex:1;min-width:150px">
-            <select id="filterSelect" onchange="renderResults()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px">
+            <input id="searchInput" placeholder="搜索 IP / 版本 / MOTD..." oninput="currentPage=1;renderResults()" style="flex:1;min-width:150px">
+            <select id="filterSelect" onchange="currentPage=1;renderResults()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px">
               <option value="all">全部</option>
               <option value="offline">仅离线</option>
               <option value="success">仅成功</option>
@@ -608,15 +609,22 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
             </select>
             <button class="btn btn-sm" style="background:var(--bg3);color:var(--text2)" onclick="exportJSON()">导出JSON</button>
             <button class="btn btn-sm" style="background:var(--bg3);color:var(--text2)" onclick="exportCSV()">导出CSV</button>
+            <button class="btn btn-sm" style="background:#8b5cf6;color:#fff" onclick="exportHTML()">HTML报告</button>
             <button class="btn btn-sm" id="batchWarnBtn" style="background:#f59e0b;color:#fff;border:none" onclick="batchWarn()">⚡ 对当前列表发警告</button>
           </div>
           <div class="table-wrap">
             <table>
               <thead><tr>
-                <th>IP:端口</th><th>版本</th><th>人数</th><th>状态</th><th>消息</th><th>MOTD</th><th>操作</th>
+                <th>IP:端口</th><th>版本</th><th>人数</th><th>在线玩家</th><th>状态</th><th>消息</th><th>MOTD</th><th>操作</th>
               </tr></thead>
               <tbody id="resultsBody"></tbody>
             </table>
+          </div>
+          <div id="pagination" style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:12px;color:var(--text2)">
+            <button onclick="prevPage()" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border);border-radius:6px;padding:4px 10px;cursor:pointer">上一页</button>
+            <span id="pageInfo">1/1</span>
+            <button onclick="nextPage()" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border);border-radius:6px;padding:4px 10px;cursor:pointer">下一页</button>
+            <span id="totalCount" style="margin-left:auto"></span>
           </div>
         </div>
 
@@ -672,6 +680,8 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
 let currentResults = [];
 let currentFilter = 'all';
 let pollTimer = null;
+let currentPage = 1;
+const pageSize = 50;
 
 function esc(s){if(s==null)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 
@@ -840,9 +850,15 @@ function renderResults(){
     }
     return true;
   });
+  const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
+  if(currentPage > totalPages) currentPage = totalPages;
+  const start = (currentPage - 1) * pageSize;
+  const pageList = list.slice(start, start + pageSize);
+  document.getElementById('pageInfo').textContent = currentPage + '/' + totalPages;
+  document.getElementById('totalCount').textContent = '共 ' + list.length + ' 条';
   const tbody = document.getElementById('resultsBody');
-  if(list.length===0){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:30px">暂无数据</td></tr>';return;}
-  tbody.innerHTML = list.slice(0,200).map(r=>{
+  if(list.length===0){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:30px">暂无数据</td></tr>';return;}
+  tbody.innerHTML = pageList.map(r=>{
     let badge='';
     if(r.success&&r.messages_sent>0)badge='<span class="badge badge-ok">已发送</span>';
     else if(r.is_offline)badge='<span class="badge badge-offline">离线</span>';
@@ -852,12 +868,34 @@ function renderResults(){
       '<td style="font-family:monospace;font-size:11px">'+esc(r.ip)+':'+r.port+'</td>'+
       '<td>'+esc(r.version_name||'?')+'</td>'+
       '<td>'+(r.players_online||0)+'/'+(r.players_max||0)+'</td>'+
+      '<td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc((r.player_list||[]).join(', '))+'">'+esc((r.player_list||[]).slice(0,3).join(', ')+((r.player_list||[]).length>3?' +'+(r.player_list.length-3):''))+'</td>'+
       '<td>'+badge+'</td>'+
       '<td>'+(r.messages_sent||0)+'</td>'+
       '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.motd||'')+'">'+esc((r.motd||'').substring(0,40))+'</td>'+
       '<td><button class="btn btn-sm btn-warn" onclick="warnSingle(\''+esc(r.ip)+'\','+r.port+',this)" style="padding:3px 8px;font-size:11px;background:#f59e0b;color:#fff;border:none;border-radius:4px;cursor:pointer">警告</button></td>'+
     '</tr>';
   }).join('');
+}
+
+function prevPage(){
+  if(currentPage > 1){currentPage--; renderResults();}
+}
+function nextPage(){
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const filter = document.getElementById('filterSelect').value;
+  let list = currentResults.filter(r=>{
+    if(filter==='offline'&&!r.is_offline)return false;
+    if(filter==='success'&&!(r.success&&r.messages_sent>0))return false;
+    if(filter==='failed'&&r.success&&r.messages_sent>0)return false;
+    if(filter==='hasPlayers'&&!(r.players_online>0))return false;
+    if(search){
+      const hay = (r.ip+':'+r.port+' '+(r.version_name||'')+' '+(r.motd||'')).toLowerCase();
+      if(!hay.includes(search))return false;
+    }
+    return true;
+  });
+  const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
+  if(currentPage < totalPages){currentPage++; renderResults();}
 }
 
 function renderLogs(logs){
@@ -910,6 +948,49 @@ function exportCSV(){
   const a = document.createElement('a');a.href=URL.createObjectURL(blob);a.download='mc-scanner-results.csv';a.click();
 }
 
+function exportHTML(){
+  const list = currentResults;
+  if(list.length===0){alert('没有数据可导出');return;}
+  const offline = list.filter(r=>r.is_offline).length;
+  const online = list.filter(r=>r.slp_ok&&!r.is_offline).length;
+  const sent = list.filter(r=>r.success&&r.messages_sent>0).length;
+  const hasPlayers = list.filter(r=>r.players_online>0).length;
+  const totalPlayers = list.reduce((s,r)=>s+(r.players_online||0),0);
+  const versions = {};
+  list.forEach(r=>{const v=r.version_name||'未知';versions[v]=(versions[v]||0)+1;});
+  const versionRows = Object.entries(versions).sort((a,b)=>b[1]-a[1]).map(([v,c])=>'<tr><td>'+esc(v)+'</td><td>'+c+'</td></tr>').join('');
+  const serverRows = list.map(r=>{
+    const status = r.success&&r.messages_sent>0?'已发送':(r.is_offline?'离线':(r.slp_ok?'在线':'失败'));
+    const players = (r.player_list||[]).join(', ')||'-';
+    return '<tr><td>'+esc(r.ip)+':'+r.port+'</td><td>'+esc(r.version_name||'?')+'</td><td>'+(r.players_online||0)+'/'+(r.players_max||0)+'</td><td>'+esc(players)+'</td><td>'+status+'</td><td>'+(r.messages_sent||0)+'</td><td>'+esc((r.motd||'').substring(0,60))+'</td></tr>';
+  }).join('');
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>MC Scanner 扫描报告</title>'+
+'<style>body{font-family:sans-serif;max-width:1200px;margin:0 auto;padding:20px;background:#f8fafc;color:#1e293b}'+
+'h1{color:#0f172a;border-bottom:3px solid #3b82f6;padding-bottom:10px}'+
+'.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin:20px 0}'+
+'.stat{background:#fff;border-radius:10px;padding:15px;box-shadow:0 1px 3px rgba(0,0,0,0.1);text-align:center}'+
+'.stat .num{font-size:28px;font-weight:bold;color:#3b82f6}'+
+'.stat .label{font-size:12px;color:#64748b;margin-top:5px}'+
+'table{width:100%;border-collapse:collapse;margin:15px 0;background:#fff;border-radius:8px;overflow:hidden}'+
+'th{background:#3b82f6;color:#fff;padding:10px;text-align:left;font-size:13px}'+
+'td{padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12px}'+
+'tr:hover{background:#f1f5f9}h2{color:#334155;margin-top:30px}'+
+'.footer{text-align:center;color:#94a3b8;font-size:11px;margin-top:30px}</style></head><body>'+
+'<h1>MC Scanner 扫描报告</h1><p>生成时间: '+new Date().toLocaleString()+'</p>'+
+'<div class="stats">'+
+'<div class="stat"><div class="num">'+list.length+'</div><div class="label">总服务器</div></div>'+
+'<div class="stat"><div class="num">'+offline+'</div><div class="label">离线模式</div></div>'+
+'<div class="stat"><div class="num">'+online+'</div><div class="label">正版模式</div></div>'+
+'<div class="stat"><div class="num">'+sent+'</div><div class="label">已发警告</div></div>'+
+'<div class="stat"><div class="num">'+hasPlayers+'</div><div class="label">有人在线</div></div>'+
+'<div class="stat"><div class="num">'+totalPlayers+'</div><div class="label">总玩家数</div></div>'+
+'</div><h2>版本分布</h2><table><tr><th>版本</th><th>数量</th></tr>'+versionRows+'</table>'+
+'<h2>服务器列表</h2><table><tr><th>地址</th><th>版本</th><th>人数</th><th>在线玩家</th><th>状态</th><th>已发</th><th>MOTD</th></tr>'+serverRows+'</table>'+
+'<div class="footer">MC Scanner v3.2 | 扫描报告自动生成</div></body></html>';
+  const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+  const a = document.createElement('a');a.href=URL.createObjectURL(blob);a.download='mc_scanner_report_'+Date.now()+'.html';a.click();
+}
+
 // 加载保存的配置
 window.addEventListener('load',()=>{
   const saved = localStorage.getItem('mcScannerCfg');
@@ -960,7 +1041,7 @@ function loadDB(p){
   fetch('/api/db/servers?'+q).then(r=>r.json()).then(d=>{
     dbTotal=d.total||0;
     document.getElementById('dbPage').textContent=dbPage+' / '+Math.max(1,Math.ceil(dbTotal/dbLimit));
-    document.getElementById('dbRows').innerHTML=d.items.map(s=>'<tr><td style="font-family:monospace;font-size:11px">'+esc(s.ip)+':'+s.port+'</td><td>'+dbTag(s.auth)+'</td><td>'+esc(s.version)+'</td><td>'+s.players_online+'/'+s.players_max+'</td><td>'+(s.is_modded?'模组':'纯净')+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(s.motd||'')+'">'+esc((s.motd||'').substring(0,40))+'</td><td style="font-size:11px;color:#64748b">'+esc((s.last_updated||'').slice(5,16))+'</td></tr>').join('')||'<tr><td colspan="7" style="text-align:center;color:#64748b;padding:30px">数据库为空，先扫描一批服务器</td></tr>';
+    document.getElementById('dbRows').innerHTML=d.items.map(s=>'<tr><td style="font-family:monospace;font-size:11px">'+esc(s.ip)+':'+s.port+'</td><td>'+dbTag(s.auth)+'</td><td>'+esc(s.version)+'</td><td>'+s.players_online+'/'+s.players_max+'</td><td>'+(s.is_modded?'模组':'纯净')+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(s.motd||'')+'">'+esc((s.motd||'').substring(0,40))+'</td><td style="font-size:11px;color:#64748b">'+esc((s.last_updated||'').slice(5,16))+'</td></tr>').join('')||'<tr><td colspan="8" style="text-align:center;color:#64748b;padding:30px">数据库为空，先扫描一批服务器</td></tr>';
   });
 }
 function prevDB(){if(dbPage>1)loadDB(dbPage-1)}
@@ -1001,7 +1082,13 @@ class Handler(BaseHTTPRequestHandler):
             s["history"] = history
             self._send_json(s)
         elif parsed.path == '/api/export':
-            self._send_json({"results": get_state()["results"]})
+            results = get_state()["results"]
+            # 去重：同一 ip:port 只保留最后一条
+            seen = {}
+            for r in results:
+                key = f"{r.get('ip','')}:{r.get('port',0)}"
+                seen[key] = r
+            self._send_json({"results": list(seen.values())})
         elif parsed.path == '/api/db/servers':
             params = parse_qs(parsed.query)
             auth = params.get("auth", [None])[0]
