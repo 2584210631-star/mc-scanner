@@ -553,7 +553,7 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>AuthMe密码 (留空=禁用，填写则启用)</label>
+            <label>AuthMe密码 (留空自动生成)</label>
             <input id="authmePassword" type="text" placeholder="默认自动生成随机密码，无需填写">
           </div>
           <div class="form-group">

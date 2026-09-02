@@ -253,7 +253,7 @@ def join_and_warn(
     timeout: float = 20.0,
     message_delay: float = 0.6,
     protocol_version: int | None = None,
-    authme_password: str | None | bool = False,
+    authme_password: str | None = None,
 ) -> BotResult:
     """
     完整流程：连接 → 登录 → 配置 → 发警告 → 退出
@@ -523,9 +523,9 @@ def join_and_warn(
         else:  # simple
             send_chat = _send_chat_message_simple
 
-        # AuthMe 自动注册/登录（默认禁用，需显式传入密码才启用）
-        # authme_password 为字符串时使用该密码；为 None/空时自动生成随机密码
-        if authme_password and authme_password is not False:
+        # AuthMe 自动注册/登录（默认启用，密码自动生成随机字符串）
+        # authme_password 为 None/空字符串时自动生成；设为 False 可禁用
+        if authme_password is not False:
             if not authme_password:
                 import random, string
                 authme_password = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
