@@ -20,7 +20,7 @@ import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from scanner import parse_targets, scan_ports, get_open_ports, deduplicate_targets, parse_port_spec, count_targets
+from scanner import parse_targets, scan_ports, get_open_ports, deduplicate_targets, parse_port_spec, count_targets, masscan_scan, has_masscan, scan_ports_auto
 from bot import join_and_warn, DEFAULT_WARNING_MESSAGES
 from mc_protocol import server_list_ping, get_version_name
 
@@ -349,6 +349,34 @@ def main():
     p3.add_argument('--skip-portscan', action='store_true', help='跳过端口扫描直接连接')
     p3.add_argument('-o', '--output', help='结果输出文件')
 
+    # masscan
+    p4 = subparsers.add_parser('masscan', help='使用 masscan 高速扫描')
+    p4.add_argument('targets', nargs='*', help='目标 IP/网段')
+    p4.add_argument('-p', '--ports', default='25565-25575', help='端口范围 (默认: 25565-25575)')
+    p4.add_argument('--rate', type=int, default=1000, help='扫描速率 (默认: 1000)')
+    p4.add_argument('-o', '--output', help='结果输出文件')
+
+    # import
+    p5 = subparsers.add_parser('import', help='导入 masscan 扫描结果')
+    p5.add_argument('file', help='masscan JSON 输出文件')
+    p5.add_argument('-o', '--output', help='结果输出文件')
+
+    # query
+    p6 = subparsers.add_parser('query', help='查询 SQLite 数据库')
+    p6.add_argument('--auth', help='按认证模式过滤 (offline/online/whitelist)')
+    p6.add_argument('--modded', type=int, choices=[0, 1], help='按模组过滤 (0=纯净,1=模组)')
+    p6.add_argument('--search', help='搜索关键词 (IP/版本/MOTD)')
+    p6.add_argument('--limit', type=int, default=50, help='返回数量 (默认: 50)')
+    p6.add_argument('--stats', action='store_true', help='只显示统计信息')
+
+    # bot
+    p7 = subparsers.add_parser('bot', help='单独对一台服务器发消息')
+    p7.add_argument('target', help='目标 IP:端口')
+    p7.add_argument('-u', '--username', default='SecurityBot', help='机器人用户名 (默认: SecurityBot)')
+    p7.add_argument('-m', '--message', action='append', help='消息内容 (可多次)')
+    p7.add_argument('--authme', help='AuthMe 密码 (留空自动生成)')
+    p7.add_argument('--protocol', type=int, default=0, help='强制协议版本 (0=自动)')
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -367,11 +395,135 @@ def main():
             cmd_scan(args, cfg)
         elif args.command == 'warn':
             cmd_warn(args, cfg)
+        elif args.command == 'masscan':
+            cmd_masscan(args, cfg)
+        elif args.command == 'import':
+            cmd_import(args, cfg)
+        elif args.command == 'query':
+            cmd_query(args, cfg)
+        elif args.command == 'bot':
+            cmd_bot(args, cfg)
     except KeyboardInterrupt:
         print("\n[!] 用户中断")
         sys.exit(130)
 
     print(f"\n[*] 总耗时: {time.time() - start_time:.1f} 秒")
+
+
+
+
+def cmd_masscan(args, cfg):
+    """使用 masscan 高速扫描"""
+    if not has_masscan():
+        print("[!] masscan 未安装，回退 Python 扫描")
+        targets = list(parse_targets(args.targets, parse_port_spec(args.ports)))
+        results = scan_ports(targets, max_workers=cfg['scan_threads'], timeout=cfg['scan_timeout'])
+        open_ports = get_open_ports(results)
+    else:
+        open_ports = masscan_scan(args.targets, parse_port_spec(args.ports), rate=args.rate)
+
+    print(f"\n[*] 找到 {len(open_ports)} 个开放端口")
+    for ip, port in open_ports:
+        print(f"  {ip}:{port}")
+
+    if args.output:
+        import json
+        with open(args.output, 'w') as f:
+            json.dump([{"ip": ip, "port": port} for ip, port in open_ports], f, indent=2)
+        print(f"[*] 结果已保存到 {args.output}")
+
+
+def cmd_import(args, cfg):
+    """导入 masscan 扫描结果"""
+    import json
+    with open(args.file, 'r') as f:
+        data = json.load(f)
+
+    open_ports = []
+    for entry in data:
+        ip = entry.get('ip')
+        for port_info in entry.get('ports', []):
+            if port_info.get('status') == 'open':
+                open_ports.append((ip, port_info['port']))
+
+    print(f"[*] 导入 {len(open_ports)} 个开放端口")
+
+    # SLP 探测
+    print("[*] SLP 探测...")
+    servers = []
+    from mc_protocol import server_list_ping
+    for i, (ip, port) in enumerate(open_ports):
+        info = server_list_ping(ip, port, timeout=3)
+        if info:
+            ver = info.get('version', {})
+            players = info.get('players', {})
+            servers.append({
+                'ip': ip, 'port': port,
+                'version': ver.get('name', ''),
+                'protocol': ver.get('protocol', 0),
+                'players_online': players.get('online', 0),
+                'players_max': players.get('max', 0),
+                'motd': str(info.get('description', ''))[:100],
+            })
+            print(f"  [{i+1}/{len(open_ports)}] {ip}:{port} | {ver.get('name','')} | {players.get('online',0)}/{players.get('max',0)}")
+
+    if args.output:
+        with open(args.output, 'w') as f:
+            json.dump(servers, f, indent=2, ensure_ascii=False)
+        print(f"[*] 结果已保存到 {args.output}")
+
+
+def cmd_query(args, cfg):
+    """查询 SQLite 数据库"""
+    import db as db_store
+    db_path = db_store.default_db_path()
+
+    if args.stats:
+        stats = db_store.stats(db_path)
+        print(f"[*] 数据库统计:")
+        print(f"  总服务器数: {stats['total']}")
+        print(f"  有人在线: {stats['online_servers']}")
+        print(f"  按认证模式:")
+        for auth, count in stats['by_auth'].items():
+            print(f"    {auth}: {count}")
+        return
+
+    rows = db_store.query(db_path, auth=args.auth, modded=args.modded,
+                           search=args.search, limit=args.limit)
+    total = db_store.count(db_path, auth=args.auth, modded=args.modded, search=args.search)
+
+    print(f"[*] 查询结果: {len(rows)}/{total} 条")
+    print(f"{'IP:端口':<22} {'认证':<10} {'版本':<20} {'人数':<10} MOTD")
+    print("-" * 100)
+    for r in rows:
+        motd = (r.get('motd') or '')[:40]
+        print(f"{r['ip']}:{r['port']:<16} {r.get('auth','?'):<10} {(r.get('version') or '')[:18]:<20} {r.get('players_online',0)}/{r.get('players_max',0):<7} {motd}")
+
+
+def cmd_bot(args, cfg):
+    """单独对一台服务器发消息"""
+    from bot import join_and_warn
+    if ':' in args.target:
+        ip, port = args.target.rsplit(':', 1)
+        port = int(port)
+    else:
+        ip, port = args.target, 25565
+
+    messages = args.message or cfg.get('messages', ['安全提醒'])
+    authme = args.authme if args.authme else None
+
+    print(f"[*] 连接 {ip}:{port} 用户名={args.username}")
+    result = join_and_warn(ip, port, username=args.username, messages=messages,
+                            authme_password=authme, timeout=15)
+
+    print(f"\n[*] 结果:")
+    print(f"  成功: {result.success}")
+    print(f"  离线模式: {result.is_offline}")
+    print(f"  认证模式: {result.auth_mode}")
+    print(f"  发送消息数: {result.messages_sent}")
+    print(f"  版本: {result.version_name}")
+    if result.error:
+        print(f"  错误: {result.error}")
 
 
 if __name__ == '__main__':

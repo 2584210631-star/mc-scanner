@@ -844,3 +844,69 @@ def get_version_name(protocol_version: int) -> str:
     # 找最接近的
     closest = min(PROTOCOL_TO_VERSION.keys(), key=lambda x: abs(x - protocol_version))
     return f"{PROTOCOL_TO_VERSION[closest]}~(协议{protocol_version})"
+
+
+# ============================================================
+# 协议多级回退（借鉴 v2 probe.py）
+# 未知协议号时自动尝试常见协议号，提高兼容性
+# ============================================================
+
+# 常见协议号，按优先级排序（从新到旧）
+COMMON_PROTOCOLS = [
+    776, 775, 774, 773, 772, 771, 770, 769, 768, 767, 766, 765, 764,
+    763, 762, 761, 760, 759, 758, 757, 756, 755, 754, 753,
+    735, 734, 733, 732, 731, 730, 729, 728, 727,
+    578, 575, 573, 570, 565, 550, 498, 490, 485, 480, 477, 404, 393, 340,
+]
+
+
+def probe_with_fallback(
+    host: str,
+    port: int = 25565,
+    timeout: float = 5.0,
+    max_attempts: int = 5,
+) -> dict | None:
+    """
+    SLP 探测带协议多级回退（借鉴 v2）
+    先用服务器返回的协议号，失败则自动尝试常见协议号
+    返回 server_info + 实际使用的协议号
+    """
+    # 第一次探测，用默认协议号获取服务器信息
+    info = server_list_ping(host, port, timeout=timeout, protocol_version=PROTOCOL_VERSION)
+    if info is None:
+        # 服务器不响应 SLP，尝试几个常见协议号
+        for proto in COMMON_PROTOCOLS[:max_attempts]:
+            info = server_list_ping(host, port, timeout=timeout, protocol_version=proto)
+            if info:
+                break
+        if info is None:
+            return None
+
+    # 从服务器信息里获取协议号
+    server_proto = info.get('version', {}).get('protocol', 0)
+
+    # 如果服务器协议号已知且支持，直接用
+    if get_play_packets(server_proto) is not None:
+        info['_used_protocol'] = server_proto
+        return info
+
+    # 服务器协议号未知，尝试回退到最接近的支持协议号
+    supported = [p for p in COMMON_PROTOCOLS if get_play_packets(p) is not None]
+    if not supported:
+        info['_used_protocol'] = PROTOCOL_VERSION
+        return info
+
+    # 找最接近的协议号
+    closest = min(supported, key=lambda p: abs(p - server_proto))
+
+    # 用最接近的协议号再探测一次（有些服务器对协议号敏感）
+    info2 = server_list_ping(host, port, timeout=timeout, protocol_version=closest)
+    if info2:
+        info2['_used_protocol'] = closest
+        info2['_server_protocol'] = server_proto
+        return info2
+
+    # 探测失败，用原始信息
+    info['_used_protocol'] = closest
+    info['_server_protocol'] = server_proto
+    return info
