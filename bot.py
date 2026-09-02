@@ -230,13 +230,14 @@ def _handle_play_packets(conn: MCConnection, packets: dict, stop_event: threadin
             except Exception:
                 pass
 
-        elif packet_id == packets["cb_ping"]:
+        elif packet_id == packets.get("cb_ping", 0x999):
             # Ping 需要回复 Pong
             if len(data) >= 4:
                 try:
                     conn.send_packet(packets["sb_pong"], data[:4])
                 except Exception:
                     break
+        # 其他包忽略
 
         elif packet_id == packets["cb_disconnect"]:
             # 被踢
@@ -508,7 +509,7 @@ def join_and_warn(
             play_thread.start()
 
         # 等一下让服务器完成初始化（发 Login Play, Chunk 等）
-        time.sleep(1.5)
+        time.sleep(3.0)
 
         # 选择聊天格式
         fmt = packets["chat_format"]
@@ -569,8 +570,8 @@ def join_and_warn(
 
         result.messages_sent = sent
 
-        # 等一下让消息送达
-        time.sleep(1.0)
+        # 等一下让消息送达并广播
+        time.sleep(3.0)
 
         if sent > 0:
             result.success = True
