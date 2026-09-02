@@ -13,6 +13,7 @@ import sys
 import csv
 import io
 import html
+import ipaddress
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -75,13 +76,40 @@ def get_state():
 # ============================================================
 # 核心扫描逻辑
 # ============================================================
+def split_into_24(target: str) -> list:
+    """把大 CIDR 或单个 IP 拆成 /24 网段列表，用于连续扫描"""
+    target = target.strip()
+    try:
+        network = ipaddress.ip_network(target, strict=False)
+        if network.prefixlen >= 24:
+            return [str(network)]
+        # 拆成 /24，限制最多 65536 个（/16），防止 /8 太大
+        subnets = list(network.subnets(new_prefix=24))
+        if len(subnets) > 65536:
+            subnets = subnets[:65536]
+        return [str(s) for s in subnets]
+    except Exception:
+        # 单个 IP 或域名，从所在 /24 开始
+        try:
+            ip_str = target.split(':')[0].split('/')[0]
+            ip = ipaddress.ip_address(ip_str)
+            return [str(ipaddress.ip_network(f'{ip}/24', strict=False))]
+        except Exception:
+            return [target]
+
+
 def run_scan(cfg):
-    """执行扫描任务（支持并发警告）"""
+    """执行扫描任务（支持连续扫描模式 + 并发警告）"""
     global stop_event
     stop_event = threading.Event()
 
     target = cfg.get('target', '').strip()
-    ports = cfg.get('ports', '25565-25600')
+    ports_str = cfg.get('ports', '25565-25700,19132-19133')
+    try:
+        port_list = parse_port_spec(ports_str)
+    except Exception:
+        port_list = [25565]
+    continuous_mode = cfg.get('continuous_mode', False)
     scan_threads = int(cfg.get('scan_threads', 200))
     scan_timeout = float(cfg.get('scan_timeout', 2.5))
     bot_threads = int(cfg.get('bot_threads', 10))
@@ -99,183 +127,188 @@ def run_scan(cfg):
         messages = [m.strip() for m in messages_raw.split('\n') if m.strip()]
     else:
         messages = [m for m in messages_raw if m and str(m).strip()]
-    # 控制每台发送消息条数
     messages = messages[:max(1, message_count)]
 
     if not target:
         update_state(phase="error", message="目标不能为空")
         return
 
+    # 连续模式：把大 CIDR 拆成 /24 列表逐个扫描
+    if continuous_mode:
+        subnet_list = split_into_24(target)
+        log(f"连续扫描模式: {target} 拆分为 {len(subnet_list)} 个 /24 网段")
+    else:
+        subnet_list = [target]
+
     update_state(
-        running=True, phase="解析目标", progress=0, total=0,
-        open_count=0, offline_count=0, success_count=0, messages_total=0,
-        results=[], logs=[], start_time=time.time(),
-        task_id=task_state["task_id"] + 1,
+        running=True, phase="连续扫描" if continuous_mode else "解析目标",
+        progress=0, total=0, open_count=0, offline_count=0,
+        success_count=0, messages_total=0, results=[], logs=[],
+        start_time=time.time(), task_id=task_state["task_id"] + 1,
     )
-    log(f"目标: {target} | 端口: {ports} | 扫描线程: {scan_threads}")
+    log(f"目标: {target} | 端口: {ports_str} ({len(port_list)}个) | 扫描线程: {scan_threads}")
+    if continuous_mode:
+        log(f"连续扫描: 共 {len(subnet_list)} 个网段，扫完自动切换下一个")
     if do_warn:
         log(f"Bot: {username} | 每台发 {len(messages)} 条消息 | Bot线程: {bot_threads}")
 
-    # 阶段1: 解析目标
-    try:
-        targets = parse_targets(target, ports)
-        targets = deduplicate_targets(targets)
-        total = len(targets)
-    except Exception as e:
-        update_state(phase="error", message=f"目标解析失败: {e}")
-        log(f"错误: {e}")
-        return
+    # 累计统计
+    total_results = []
+    total_targets = 0
+    total_open = 0
+    subnet_idx = 0
 
-    update_state(phase="端口扫描", total=total)
-    log(f"共 {total} 个目标，开始端口扫描...")
-
-    # 阶段2: 端口扫描
-    open_ports = []
-
-    def scan_progress(done, total_t):
+    for subnet_target in subnet_list:
         if stop_event.is_set():
-            return
-        update_state(progress=done)
+            break
+        subnet_idx += 1
+        log(f"--- 网段 {subnet_idx}/{len(subnet_list)}: {subnet_target} ---")
+        update_state(phase=f"扫描 {subnet_target} ({subnet_idx}/{len(subnet_list)})")
 
-    try:
-        open_ports = scan_ports(
-            targets, timeout=scan_timeout, max_workers=scan_threads,
-            progress_callback=scan_progress, stop_event=stop_event,
-        )
-    except Exception as e:
-        log(f"扫描异常: {e}")
-
-    open_count = len(open_ports)
-    update_state(open_count=open_count, phase="SLP探测")
-    log(f"端口扫描完成，发现 {open_count} 个开放端口")
-
-    if stop_event.is_set():
-        update_state(running=False, phase="已停止")
-        log("任务已停止")
-        _save_history(cfg, total, open_count, 0, 0, 0)
-        return
-
-    if not open_ports:
-        update_state(running=False, phase="完成", message="未发现开放端口")
-        log("未发现开放端口，任务结束")
-        _save_history(cfg, total, open_count, 0, 0, 0)
-        return
-
-    # 阶段3: SLP 探测 + 离线检测 + 警告（并发）
-    all_results = []
-    offline_servers = []
-    done_count = 0
-
-    def process_target(ip, port):
-        nonlocal done_count
-        if stop_event.is_set():
-            return None
-        entry = {"ip": ip, "port": port}
+        # 阶段1: 解析目标
         try:
-            info = server_list_ping(ip, port, timeout=4.0)
-            if info:
-                v = info.get('version', {})
-                p = info.get('players', {})
-                desc = info.get('description', '')
-                if isinstance(desc, dict):
-                    motd = desc.get('text', str(desc))[:200]
-                else:
-                    motd = str(desc)[:200]
-                entry.update({
-                    "version_name": v.get('name', '?'),
-                    "protocol_version": v.get('protocol', 0),
-                    "players_online": p.get('online', 0),
-                    "players_max": p.get('max', 0),
-                    "motd": motd,
-                    "slp_ok": True,
-                })
-            else:
-                entry.update({"version_name": "?", "protocol_version": 0,
-                              "players_online": 0, "players_max": 0, "motd": "", "slp_ok": False})
+            targets = parse_targets([subnet_target], port_list)
+            targets = deduplicate_targets(targets)
+            subnet_total = len(targets)
         except Exception as e:
-            entry.update({"version_name": "?", "protocol_version": 0,
-                          "players_online": 0, "players_max": 0, "motd": "", "slp_ok": False, "error": str(e)[:100]})
+            log(f"网段 {subnet_target} 解析失败: {e}")
+            continue
 
-        # 离线模式检测 + 警告
-        if do_warn and entry.get("slp_ok"):
+        total_targets += subnet_total
+        update_state(total=total_targets)
+        log(f"网段 {subnet_target}: {subnet_total} 个目标")
+
+        # 阶段2: 端口扫描
+        def scan_progress(done, total_t, open_cnt=0):
+            if stop_event.is_set():
+                return
+            update_state(progress=total_targets - subnet_total + done)
+
+        try:
+            open_ports = scan_ports(
+                targets, timeout=scan_timeout, max_workers=scan_threads,
+                progress_callback=scan_progress, stop_event=stop_event,
+            )
+        except Exception as e:
+            log(f"扫描异常: {e}")
+            open_ports = []
+
+        total_open += len(open_ports)
+        update_state(open_count=total_open)
+        log(f"网段 {subnet_target}: 发现 {len(open_ports)} 个开放端口")
+
+        if stop_event.is_set() or not open_ports:
+            continue
+
+        # 阶段3: SLP 探测 + 离线检测 + 警告（并发）
+        subnet_results = []
+        done_count = 0
+
+        def process_target(ip, port):
+            nonlocal done_count
+            if stop_event.is_set():
+                return None
+            entry = {"ip": ip, "port": port}
             try:
-                proto = force_protocol or entry.get("protocol_version") or None
-                r = join_and_warn(
-                    ip, port, username=username, messages=messages,
-                    timeout=bot_timeout, protocol_version=proto,
-                    authme_password=authme_password, message_delay=message_delay,
-                )
-                entry.update({
-                    "is_offline": r.is_offline,
-                    "success": r.success,
-                    "messages_sent": r.messages_sent,
-                    "authme_used": r.authme_used,
-                    "error": r.error or "",
-                })
-                if r.is_offline:
-                    offline_servers.append(entry)
-                if r.success and r.messages_sent > 0:
-                    log(f"✓ {ip}:{port} 发送{r.messages_sent}条 ({entry.get('version_name','?')})")
+                info = server_list_ping(ip, port, timeout=4.0)
+                if info:
+                    v = info.get('version', {})
+                    p = info.get('players', {})
+                    desc = info.get('description', '')
+                    if isinstance(desc, dict):
+                        motd = desc.get('text', str(desc))[:200]
+                    else:
+                        motd = str(desc)[:200]
+                    entry.update({
+                        "version_name": v.get('name', '?'),
+                        "protocol_version": v.get('protocol', 0),
+                        "players_online": p.get('online', 0),
+                        "players_max": p.get('max', 0),
+                        "motd": motd, "slp_ok": True,
+                    })
+                else:
+                    entry.update({"version_name": "?", "protocol_version": 0,
+                                  "players_online": 0, "players_max": 0, "motd": "", "slp_ok": False})
             except Exception as e:
-                entry.update({"is_offline": False, "success": False,
-                              "messages_sent": 0, "error": str(e)[:100]})
-        else:
-            # 不发警告时也检测离线（通过尝试登录）
-            if entry.get("slp_ok") and not do_warn:
+                entry.update({"version_name": "?", "protocol_version": 0,
+                              "players_online": 0, "players_max": 0, "motd": "", "slp_ok": False, "error": str(e)[:100]})
+
+            if do_warn and entry.get("slp_ok"):
                 try:
                     proto = force_protocol or entry.get("protocol_version") or None
-                    r = join_and_warn(ip, port, username=username, messages=[],
-                                      timeout=bot_timeout, protocol_version=proto)
-                    entry["is_offline"] = r.is_offline
-                    if r.is_offline:
-                        offline_servers.append(entry)
-                except Exception:
-                    entry["is_offline"] = False
+                    r = join_and_warn(
+                        ip, port, username=username, messages=messages,
+                        timeout=bot_timeout, protocol_version=proto,
+                        authme_password=authme_password, message_delay=message_delay,
+                    )
+                    entry.update({
+                        "is_offline": r.is_offline, "success": r.success,
+                        "messages_sent": r.messages_sent, "authme_used": r.authme_used,
+                        "error": r.error or "",
+                    })
+                    if r.success and r.messages_sent > 0:
+                        log(f"✓ {ip}:{port} 发送{r.messages_sent}条 ({entry.get('version_name','?')})")
+                except Exception as e:
+                    entry.update({"is_offline": False, "success": False,
+                                  "messages_sent": 0, "error": str(e)[:100]})
             else:
-                entry["is_offline"] = False
-            entry.setdefault("success", False)
-            entry.setdefault("messages_sent", 0)
+                if entry.get("slp_ok") and not do_warn:
+                    try:
+                        proto = force_protocol or entry.get("protocol_version") or None
+                        r = join_and_warn(ip, port, username=username, messages=[],
+                                          timeout=bot_timeout, protocol_version=proto)
+                        entry["is_offline"] = r.is_offline
+                    except Exception:
+                        entry["is_offline"] = False
+                else:
+                    entry["is_offline"] = False
+                entry.setdefault("success", False)
+                entry.setdefault("messages_sent", 0)
 
-        done_count += 1
-        if done_count % 5 == 0 or done_count == open_count:
-            update_state(
-                progress=total - open_count + done_count,
-                results=list(all_results),
-                offline_count=len(offline_servers),
-                success_count=sum(1 for r in all_results if r.get("success") and r.get("messages_sent", 0) > 0),
-                messages_total=sum(r.get("messages_sent", 0) for r in all_results),
-            )
-        return entry
+            done_count += 1
+            if done_count % 5 == 0 or done_count == len(open_ports):
+                offline_count = sum(1 for r in total_results + subnet_results if r.get("is_offline"))
+                success_count = sum(1 for r in total_results + subnet_results if r.get("success") and r.get("messages_sent", 0) > 0)
+                msg_total = sum(r.get("messages_sent", 0) for r in total_results + subnet_results)
+                update_state(
+                    progress=total_targets - len(open_ports) + done_count,
+                    results=list(total_results + subnet_results),
+                    offline_count=offline_count, success_count=success_count,
+                    messages_total=msg_total,
+                )
+            return entry
 
-    log(f"开始 SLP 探测{'+警告' if do_warn else ''}，Bot线程: {bot_threads}")
-    update_state(phase="警告中" if do_warn else "探测中")
+        update_state(phase=f"警告 {subnet_target} ({subnet_idx}/{len(subnet_list)})" if do_warn else f"探测 {subnet_target}")
+        with ThreadPoolExecutor(max_workers=bot_threads) as executor:
+            futures = {executor.submit(process_target, sr.ip, sr.port): (sr.ip, sr.port) for sr in open_ports}
+            for future in as_completed(futures):
+                if stop_event.is_set():
+                    break
+                try:
+                    result = future.result()
+                    if result:
+                        subnet_results.append(result)
+                except Exception as e:
+                    ip, port = futures[future]
+                    subnet_results.append({"ip": ip, "port": port, "success": False,
+                                           "messages_sent": 0, "error": str(e)[:100], "is_offline": False})
 
-    with ThreadPoolExecutor(max_workers=bot_threads) as executor:
-        futures = {executor.submit(process_target, ip, port): (ip, port) for ip, port in open_ports}
-        for future in as_completed(futures):
-            if stop_event.is_set():
-                break
-            try:
-                result = future.result()
-                if result:
-                    all_results.append(result)
-            except Exception as e:
-                ip, port = futures[future]
-                all_results.append({"ip": ip, "port": port, "success": False,
-                                    "messages_sent": 0, "error": str(e)[:100], "is_offline": False})
+        total_results.extend(subnet_results)
+        log(f"网段 {subnet_target} 完成: {len(subnet_results)} 个结果")
 
     # 最终状态
-    success_count = sum(1 for r in all_results if r.get("success") and r.get("messages_sent", 0) > 0)
-    msg_total = sum(r.get("messages_sent", 0) for r in all_results)
-    offline_count = len(offline_servers)
+    offline_count = sum(1 for r in total_results if r.get("is_offline"))
+    success_count = sum(1 for r in total_results if r.get("success") and r.get("messages_sent", 0) > 0)
+    msg_total = sum(r.get("messages_sent", 0) for r in total_results)
 
     update_state(
-        running=False, phase="完成", results=all_results,
-        offline_count=offline_count, success_count=success_count,
-        messages_total=msg_total, progress=total,
+        running=False, phase="完成" if not stop_event.is_set() else "已停止",
+        results=total_results, offline_count=offline_count,
+        success_count=success_count, messages_total=msg_total,
+        progress=total_targets, total=total_targets, open_count=total_open,
     )
-    log(f"任务完成: 扫描{total} 开放{open_count} 离线{offline_count} 成功{success_count} 消息{msg_total}")
-    _save_history(cfg, total, open_count, offline_count, success_count, msg_total)
+    log(f"全部完成: 扫描{total_targets} 开放{total_open} 离线{offline_count} 成功{success_count} 消息{msg_total}")
+    _save_history(cfg, total_targets, total_open, offline_count, success_count, msg_total)
 
 
 def _save_history(cfg, total, open_count, offline_count, success_count, msg_total):
@@ -421,13 +454,17 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>端口范围</label>
-            <input id="ports" value="25565-25600">
+            <label>端口范围 (支持1-65535, 逗号分隔多段)</label>
+            <input id="ports" value="25565-25700,19132-19133">
           </div>
           <div class="form-group">
             <label>扫描线程</label>
             <input id="scanThreads" type="number" value="200" min="1" max="1000">
           </div>
+        </div>
+        <div class="checkbox-row">
+          <label class="switch"><input type="checkbox" id="continuousMode"><span class="slider"></span></label>
+          <label for="continuousMode">连续扫描 (大网段自动拆/24逐个扫, 扫完自动切换)</label>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -563,6 +600,7 @@ function getCfg(){
   return {
     target: document.getElementById('target').value,
     ports: document.getElementById('ports').value,
+    continuous_mode: document.getElementById('continuousMode').checked,
     scan_threads: document.getElementById('scanThreads').value,
     scan_timeout: document.getElementById('scanTimeout').value,
     bot_threads: document.getElementById('botThreads').value,
@@ -730,6 +768,7 @@ window.addEventListener('load',()=>{
       if(c.bot_threads)document.getElementById('botThreads').value=c.bot_threads;
       if(c.message_count)document.getElementById('messageCount').value=c.message_count;
       if(c.message_delay)document.getElementById('messageDelay').value=c.message_delay;
+      if(c.continuous_mode!==undefined)document.getElementById('continuousMode').checked=c.continuous_mode;
     }catch(e){}
   }
   pollState();
