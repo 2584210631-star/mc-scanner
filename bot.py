@@ -426,8 +426,19 @@ def join_and_warn(
             conn.send_packet(sb_plugin, brand_payload)
 
             config_ok = False
+            config_start = time.time()
+            config_fallback = 3.0  # 超时兜底：3s没收到finish就主动发(借鉴v2)
             while conn.state == STATE_CONFIGURATION:
-                packet_id, data = conn.recv_packet(timeout=timeout)
+                # 超时兜底：某些服务器(Paper/Spigot某些版本)可能不主动发finish
+                if time.time() - config_start > config_fallback and not config_ok:
+                    try:
+                        conn.send_packet(sb_finish)
+                        conn.state = STATE_PLAY
+                        config_ok = True
+                        break
+                    except Exception:
+                        break
+                packet_id, data = conn.recv_packet(timeout=min(timeout, 1.0))
                 buf = io.BytesIO(data)
 
                 if packet_id == cb_finish:

@@ -25,11 +25,14 @@ from scanner import (
 )
 from bot import join_and_warn, DEFAULT_WARNING_MESSAGES
 from mc_protocol import server_list_ping, get_version_name
+import db as db_store
 
 # ============================================================
 # 全局状态
 # ============================================================
 MAX_HISTORY = 20
+DB_PATH = db_store.default_db_path()
+db_store.init_db(DB_PATH)
 task_state = {
     "running": False,
     "phase": "idle",
@@ -317,6 +320,31 @@ def run_scan(cfg):
         progress=total_targets, total=total_targets, open_count=total_open,
     )
     log(f"全部完成: 扫描{total_targets} 开放{total_open} 离线{offline_count} 成功{success_count} 消息{msg_total}")
+
+    # 写入 SQLite 数据库（失败不影响主流程）
+    try:
+        db_records = []
+        for r in total_results:
+            if not r.get("slp_ok"):
+                continue
+            db_records.append({
+                "ip": r["ip"], "port": r["port"],
+                "version": r.get("version_name", ""),
+                "proto": r.get("protocol_version", 0),
+                "motd": r.get("motd", ""),
+                "is_modded": 1 if "fabric" in r.get("version_name", "").lower() or "paper" in r.get("version_name", "").lower() or "purpur" in r.get("version_name", "").lower() else 0,
+                "players_online": r.get("players_online", 0),
+                "players_max": r.get("players_max", 0),
+                "auth": r.get("auth_mode", "offline" if r.get("is_offline") else "unknown"),
+                "ping_ms": None,
+                "json": json.dumps(r, ensure_ascii=False),
+            })
+        if db_records:
+            db_store.upsert_many(DB_PATH, db_records)
+            log(f"数据库: 写入 {len(db_records)} 条记录")
+    except Exception as e:
+        log(f"数据库写入失败: {e}")
+
     _save_history(cfg, total_targets, total_open, offline_count, success_count, msg_total)
 
 
@@ -565,6 +593,7 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
           <div class="tab active" onclick="switchTab('results')">扫描结果</div>
           <div class="tab" onclick="switchTab('logs')">实时日志</div>
           <div class="tab" onclick="switchTab('history')">历史记录</div>
+          <div class="tab" onclick="switchTab('database')">数据库</div>
         </div>
 
         <div id="tabResults">
@@ -596,6 +625,42 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
 
         <div id="tabHistory" style="display:none">
           <div id="historyList"></div>
+        </div>
+        <div id="tabDatabase" style="display:none">
+          <div class="cards" id="dbCards" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+            <div class="card" style="flex:1;min-width:100px;padding:10px"><div class="num" id="dbTotal" style="font-size:20px;font-weight:700">0</div><div class="label" style="font-size:11px;color:#94a3b8">服务器总数</div></div>
+            <div class="card" style="flex:1;min-width:100px;padding:10px"><div class="num" id="dbOffline" style="font-size:20px;font-weight:700;color:#22c55e">0</div><div class="label" style="font-size:11px;color:#94a3b8">离线/破解</div></div>
+            <div class="card" style="flex:1;min-width:100px;padding:10px"><div class="num" id="dbOnline" style="font-size:20px;font-weight:700;color:#3b82f6">0</div><div class="label" style="font-size:11px;color:#94a3b8">正版验证</div></div>
+            <div class="card" style="flex:1;min-width:100px;padding:10px"><div class="num" id="dbWhitelist" style="font-size:20px;font-weight:700;color:#eab308">0</div><div class="label" style="font-size:11px;color:#94a3b8">白名单</div></div>
+            <div class="card" style="flex:1;min-width:100px;padding:10px"><div class="num" id="dbHasPlayers" style="font-size:20px;font-weight:700;color:#06b6d4">0</div><div class="label" style="font-size:11px;color:#94a3b8">有人在线</div></div>
+          </div>
+          <div class="filters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+            <select id="dbAuth" style="background:#1e2230;border:1px solid #2a2f3e;border-radius:6px;padding:6px 10px;color:#e2e8f0;font-size:12px">
+              <option value="">全部认证</option>
+              <option value="offline">离线/破解</option>
+              <option value="online">正版</option>
+              <option value="whitelist">白名单</option>
+              <option value="rejected">拒绝</option>
+              <option value="unknown">未知</option>
+            </select>
+            <select id="dbMod" style="background:#1e2230;border:1px solid #2a2f3e;border-radius:6px;padding:6px 10px;color:#e2e8f0;font-size:12px">
+              <option value="">全部</option>
+              <option value="1">模组服</option>
+              <option value="0">纯净服</option>
+            </select>
+            <input id="dbSearch" placeholder="搜索 IP/版本/MOTD" style="flex:1;min-width:150px;background:#1e2230;border:1px solid #2a2f3e;border-radius:6px;padding:6px 10px;color:#e2e8f0;font-size:12px">
+            <button onclick="loadDB(1)" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">查询</button>
+            <button onclick="loadDBStats()" style="background:#1e2230;color:#94a3b8;border:1px solid #2a2f3e;border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">刷新统计</button>
+          </div>
+          <div style="overflow-x:auto"><table>
+            <thead><tr><th>IP:端口</th><th>认证</th><th>版本</th><th>人数</th><th>类型</th><th>MOTD</th><th>更新时间</th></tr></thead>
+            <tbody id="dbRows"></tbody>
+          </table></div>
+          <div class="pg" style="display:flex;gap:8px;margin-top:12px;align-items:center;font-size:12px">
+            <button onclick="prevDB()" style="background:#1e2230;color:#94a3b8;border:1px solid #2a2f3e;border-radius:6px;padding:6px 12px;cursor:pointer">上一页</button>
+            <span id="dbPage" style="color:#94a3b8">1</span>
+            <button onclick="nextDB()" style="background:#1e2230;color:#94a3b8;border:1px solid #2a2f3e;border-radius:6px;padding:6px 12px;cursor:pointer">下一页</button>
+          </div>
         </div>
       </div>
     </div>
@@ -742,11 +807,13 @@ function renderHistory(h){
 
 function switchTab(tab){
   document.querySelectorAll('.tab').forEach((t,i)=>{
-    t.classList.toggle('active',['results','logs','history'][i]===tab);
+    t.classList.toggle('active',['results','logs','history','database'][i]===tab);
   });
   document.getElementById('tabResults').style.display = tab==='results'?'block':'none';
   document.getElementById('tabLogs').style.display = tab==='logs'?'block':'none';
   document.getElementById('tabHistory').style.display = tab==='history'?'block':'none';
+  document.getElementById('tabDatabase').style.display = tab==='database'?'block':'none';
+  if(tab==='database'){loadDBStats();loadDB(1);}
 }
 
 function exportJSON(){
@@ -792,6 +859,38 @@ window.addEventListener('load',()=>{
 
 // 自动保存配置
 setInterval(()=>{localStorage.setItem('mcScannerCfg',JSON.stringify(getCfg()));},5000);
+
+// ===== 数据库功能 =====
+let dbPage=1, dbLimit=50, dbTotal=0;
+function dbTag(a){const map={offline:['offline','离线'],online:['online','正版'],whitelist:['whitelist','白名单'],rejected:['rejected','拒绝'],unknown:['unknown','未知']};
+ const t=map[a]||[a,a];return '<span class="badge badge-'+t[0]+'">'+t[1]+'</span>';}
+function loadDBStats(){
+  fetch('/api/db/stats').then(r=>r.json()).then(s=>{
+    const auth=s.by_auth||{};
+    document.getElementById('dbTotal').textContent=s.total||0;
+    document.getElementById('dbOffline').textContent=auth.offline||0;
+    document.getElementById('dbOnline').textContent=auth.online||0;
+    document.getElementById('dbWhitelist').textContent=auth.whitelist||0;
+    document.getElementById('dbHasPlayers').textContent=s.online_servers||0;
+  });
+}
+function loadDB(p){
+  dbPage=p;
+  const q=new URLSearchParams({
+    auth:document.getElementById('dbAuth').value,
+    modded:document.getElementById('dbMod').value,
+    search:document.getElementById('dbSearch').value,
+    limit:dbLimit,offset:(dbPage-1)*dbLimit
+  });
+  fetch('/api/db/servers?'+q).then(r=>r.json()).then(d=>{
+    dbTotal=d.total||0;
+    document.getElementById('dbPage').textContent=dbPage+' / '+Math.max(1,Math.ceil(dbTotal/dbLimit));
+    document.getElementById('dbRows').innerHTML=d.items.map(s=>'<tr><td style="font-family:monospace;font-size:11px">'+esc(s.ip)+':'+s.port+'</td><td>'+dbTag(s.auth)+'</td><td>'+esc(s.version)+'</td><td>'+s.players_online+'/'+s.players_max+'</td><td>'+(s.is_modded?'模组':'纯净')+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(s.motd||'')+'">'+esc((s.motd||'').substring(0,40))+'</td><td style="font-size:11px;color:#64748b">'+esc((s.last_updated||'').slice(5,16))+'</td></tr>').join('')||'<tr><td colspan="7" style="text-align:center;color:#64748b;padding:30px">数据库为空，先扫描一批服务器</td></tr>';
+  });
+}
+function prevDB(){if(dbPage>1)loadDB(dbPage-1)}
+function nextDB(){if(dbPage<Math.ceil(dbTotal/dbLimit))loadDB(dbPage+1)}
+document.getElementById('dbSearch').addEventListener('keydown',e=>{if(e.key==='Enter')loadDB(1);});
 </script>
 </body>
 </html>
@@ -828,6 +927,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(s)
         elif parsed.path == '/api/export':
             self._send_json({"results": get_state()["results"]})
+        elif parsed.path == '/api/db/servers':
+            params = parse_qs(parsed.query)
+            auth = params.get("auth", [None])[0]
+            modded = params.get("modded", [None])[0]
+            modded = None if modded in (None, "") else (modded == "1")
+            search = params.get("search", [None])[0]
+            limit = min(int(params.get("limit", [50])[0]), 500)
+            offset = int(params.get("offset", [0])[0])
+            rows = db_store.query(DB_PATH, auth=auth, modded=modded, search=search,
+                                   limit=limit, offset=offset)
+            total = db_store.count(DB_PATH, auth=auth, modded=modded, search=search)
+            self._send_json({"total": total, "items": rows})
+        elif parsed.path == '/api/db/stats':
+            self._send_json(db_store.stats(DB_PATH))
         else:
             self._send_json({"error": "Not found"}, 404)
 
