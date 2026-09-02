@@ -76,6 +76,8 @@ class BotResult:
     port: int
     success: bool = False
     is_offline: bool = False
+    is_whitelist: bool = False
+    auth_mode: str = "unknown"  # offline / online / whitelist / rejected / unknown
     server_info: dict | None = None
     protocol_version: int = 0
     version_name: str = ""
@@ -343,14 +345,23 @@ def join_and_warn(
             buf = io.BytesIO(data)
 
             if packet_id == LOGIN_CB_ENCRYPTION_REQUEST:
-                # 在线模式服务器，不支持
+                # 在线模式服务器
+                result.auth_mode = "online"
                 result.error = "online-mode (服务器要求正版验证)"
                 conn.close()
                 return result
 
             elif packet_id == LOGIN_CB_DISCONNECT:
                 reason = read_string_from_stream(buf)
-                result.error = f"登录被踢: {reason[:150]}"
+                reason_lower = reason.lower()
+                # 白名单检测：断开消息含 whitelist/白名单关键词
+                if "whitelist" in reason_lower or "白名单" in reason or "not white-listed" in reason_lower:
+                    result.is_whitelist = True
+                    result.auth_mode = "whitelist"
+                    result.error = f"whitelist: {reason[:120]}"
+                else:
+                    result.auth_mode = "rejected"
+                    result.error = f"登录被踢: {reason[:150]}"
                 conn.close()
                 return result
 
@@ -376,6 +387,7 @@ def join_and_warn(
                     # 1.20.1及以下: 直接进入 play 状态
                     conn.state = STATE_PLAY
                 login_ok = True
+                result.auth_mode = "offline"
 
             elif packet_id == LOGIN_CB_LOGIN_PLUGIN_REQUEST:
                 # 插件请求，回复 declined

@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from scanner import (
     parse_targets, scan_ports, get_open_ports, deduplicate_targets, parse_port_spec,
+    load_exclude_list, filter_excluded,
 )
 from bot import join_and_warn, DEFAULT_WARNING_MESSAGES
 from mc_protocol import server_list_ping, get_version_name
@@ -110,6 +111,8 @@ def run_scan(cfg):
     except Exception:
         port_list = [25565]
     continuous_mode = cfg.get('continuous_mode', False)
+    use_exclude = cfg.get('use_exclude', True)
+    exclude_nets = load_exclude_list(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'exclude.conf')) if use_exclude else []
     scan_threads = int(cfg.get('scan_threads', 200))
     scan_timeout = float(cfg.get('scan_timeout', 2.5))
     bot_threads = int(cfg.get('bot_threads', 10))
@@ -169,6 +172,12 @@ def run_scan(cfg):
         try:
             targets = parse_targets([subnet_target], port_list)
             targets = deduplicate_targets(targets)
+            # 排除列表过滤
+            if use_exclude:
+                before = len(targets)
+                targets = filter_excluded(targets, exclude_nets)
+                if before != len(targets):
+                    log(f"排除列表过滤: {before} -> {len(targets)} (跳过{before-len(targets)}个)")
             subnet_total = len(targets)
         except Exception as e:
             log(f"网段 {subnet_target} 解析失败: {e}")
@@ -466,6 +475,10 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
           <label class="switch"><input type="checkbox" id="continuousMode"><span class="slider"></span></label>
           <label for="continuousMode">连续扫描 (大网段自动拆/24逐个扫, 扫完自动切换)</label>
         </div>
+        <div class="checkbox-row">
+          <label class="switch"><input type="checkbox" id="useExclude" checked><span class="slider"></span></label>
+          <label for="useExclude">启用排除列表 (过滤私有地址/保留段, exclude.conf)</label>
+        </div>
         <div class="form-row">
           <div class="form-group">
             <label>扫描超时(s)</label>
@@ -601,6 +614,7 @@ function getCfg(){
     target: document.getElementById('target').value,
     ports: document.getElementById('ports').value,
     continuous_mode: document.getElementById('continuousMode').checked,
+    use_exclude: document.getElementById('useExclude').checked,
     scan_threads: document.getElementById('scanThreads').value,
     scan_timeout: document.getElementById('scanTimeout').value,
     bot_threads: document.getElementById('botThreads').value,
@@ -769,6 +783,7 @@ window.addEventListener('load',()=>{
       if(c.message_count)document.getElementById('messageCount').value=c.message_count;
       if(c.message_delay)document.getElementById('messageDelay').value=c.message_delay;
       if(c.continuous_mode!==undefined)document.getElementById('continuousMode').checked=c.continuous_mode;
+      if(c.use_exclude!==undefined)document.getElementById('useExclude').checked=c.use_exclude;
     }catch(e){}
   }
   pollState();

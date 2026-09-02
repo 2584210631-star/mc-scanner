@@ -211,3 +211,37 @@ def deduplicate_targets(targets: list[tuple[str, int]]) -> list[tuple[str, int]]
             seen.add(key)
             unique.append(key)
     return unique
+
+
+def load_exclude_list(filepath: str) -> list:
+    """加载排除列表文件，每行一个 CIDR。文件不存在返回空列表。"""
+    networks = []
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                try:
+                    networks.append(ipaddress.ip_network(line, strict=False))
+                except ValueError:
+                    continue
+    except FileNotFoundError:
+        pass
+    return networks
+
+
+def filter_excluded(targets: list, exclude_networks: list) -> list:
+    """过滤掉在排除列表中的目标。IP 无法解析时保留（不排除）。"""
+    if not exclude_networks:
+        return targets
+    filtered = []
+    for ip, port in targets:
+        try:
+            addr = ipaddress.ip_address(ip)
+            if any(addr in net for net in exclude_networks):
+                continue
+        except ValueError:
+            pass  # 域名等非IP，不排除
+        filtered.append((ip, port))
+    return filtered

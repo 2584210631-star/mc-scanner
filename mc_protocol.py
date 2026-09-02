@@ -351,8 +351,22 @@ def server_list_ping(
             if packet_id == 0x00:
                 buf = io.BytesIO(data)
                 response_json = read_string_from_stream(buf)
+                try:
+                    result = json.loads(response_json)
+                except json.JSONDecodeError:
+                    # 截断容错：某些服务器(如Hypixel部分节点)声明的JSON长度比实际短
+                    extra = buf.read()
+                    if extra:
+                        try:
+                            result = json.loads(response_json + extra.decode('utf-8', errors='replace'))
+                        except json.JSONDecodeError:
+                            conn.close()
+                            return None
+                    else:
+                        conn.close()
+                        return None
                 conn.close()
-                return json.loads(response_json)
+                return result
 
             conn.close()
             return None
