@@ -177,6 +177,11 @@ def cmd_portscan(args, cfg):
 
 def cmd_scan(args, cfg):
     """扫描端口 + SLP 探测"""
+    # 命令行参数覆盖配置
+    if getattr(args, 'workers', None):
+        cfg['scan_threads'] = args.workers
+    if getattr(args, 'timeout', None):
+        cfg['scan_timeout'] = args.timeout
     targets = _load_targets(args, cfg, cfg['ports'])
     if not targets:
         print("[!] 没有有效的目标"); return
@@ -184,7 +189,7 @@ def cmd_scan(args, cfg):
     print(f"[*] 目标数: {len(targets)} | 端口: {cfg['ports']} | 线程: {cfg['scan_threads']}")
 
     # 阶段1: 端口扫描
-    port_results = scan_ports(targets, max_workers=cfg['scan_threads'], timeout=cfg['scan_timeout'], show_progress=False)
+    port_results = scan_ports(targets, max_workers=cfg['scan_threads'], timeout=cfg['scan_timeout'], show_progress=False, rate=getattr(args, 'rate', 0))
     open_ports = get_open_ports(port_results)
     print(f"[*] 端口扫描完成，开放 {len(open_ports)} 个")
 
@@ -228,6 +233,14 @@ def cmd_scan(args, cfg):
 
 def cmd_warn(args, cfg):
     """完整流程：扫描 → 离线检测 → 发警告"""
+    # 命令行参数覆盖配置
+    if getattr(args, 'workers', None):
+        cfg['scan_threads'] = args.workers
+    if getattr(args, 'timeout', None):
+        cfg['scan_timeout'] = args.timeout
+    if getattr(args, 'bot_workers', None):
+        cfg['bot_threads'] = args.bot_workers
+    no_auth = getattr(args, 'no_auth', False)
     targets = _load_targets(args, cfg, cfg['ports'])
     if not targets:
         print("[!] 没有有效的目标"); return
@@ -249,7 +262,7 @@ def cmd_warn(args, cfg):
     if args.skip_portscan:
         open_ports = targets
     else:
-        port_results = scan_ports(targets, max_workers=cfg['scan_threads'], timeout=cfg['scan_timeout'], show_progress=False)
+        port_results = scan_ports(targets, max_workers=cfg['scan_threads'], timeout=cfg['scan_timeout'], show_progress=False, rate=getattr(args, 'rate', 0))
         open_ports = get_open_ports(port_results)
     print(f"[*] 开放端口: {len(open_ports)} 个")
 
@@ -257,6 +270,21 @@ def cmd_warn(args, cfg):
         print("[!] 没有开放端口，跳过"); return
 
     # 阶段2: 批量连接检测+发警告（带进度条）
+    if no_auth:
+        print(f"[*] --no-auth 模式: 只做 SLP 探测，不登录发消息")
+        from mc_protocol import server_list_ping
+        mc_servers = []
+        for i, (ip, port) in enumerate(open_ports):
+            info = server_list_ping(ip, port, timeout=cfg['scan_timeout'])
+            if info:
+                v = info.get('version', {})
+                p = info.get('players', {})
+                mc_servers.append({'ip': ip, 'port': port, 'info': info})
+                print(f"  [{i+1}/{len(open_ports)}] {ip}:{port} | {v.get('name','')} | {p.get('online',0)}/{p.get('max',0)}")
+        print(f"\n[*] SLP 探测完成: {len(mc_servers)} 个服务器")
+        if args.output or cfg['output_file']:
+            save_results(mc_servers, args.output or cfg['output_file'], cfg['output_format'])
+        return
     print(f"[*] 开始离线模式检测和警告...")
     results = []
     pb = ProgressBar(len(open_ports), "警告发送")
@@ -337,6 +365,9 @@ def main():
     p2 = subparsers.add_parser('scan', help='扫描端口并SLP探测')
     p2.add_argument('targets', nargs='*', help='目标 IP/网段/主机名')
     p2.add_argument('-f', '--file', help='从文件读取目标')
+    p2.add_argument('--workers', type=int, help='扫描线程数 (覆盖配置)')
+    p2.add_argument('--timeout', type=float, help='扫描超时秒数 (覆盖配置)')
+    p2.add_argument('--rate', type=int, default=0, help='每秒最大连接数 (0=不限速)')
     p2.add_argument('-o', '--output', help='结果输出文件')
 
     # warn
@@ -347,6 +378,11 @@ def main():
     p3.add_argument('-m', '--message', action='append', help='自定义警告消息 (可多次)')
     p3.add_argument('--message-file', help='从文件读取警告消息')
     p3.add_argument('--skip-portscan', action='store_true', help='跳过端口扫描直接连接')
+    p3.add_argument('--no-auth', action='store_true', help='只SLP探测不登录发消息')
+    p3.add_argument('--workers', type=int, help='扫描线程数 (覆盖配置)')
+    p3.add_argument('--timeout', type=float, help='扫描超时秒数 (覆盖配置)')
+    p3.add_argument('--bot-workers', type=int, help='机器人线程数 (覆盖配置)')
+    p3.add_argument('--rate', type=int, default=0, help='每秒最大连接数 (0=不限速)')
     p3.add_argument('-o', '--output', help='结果输出文件')
 
     # masscan

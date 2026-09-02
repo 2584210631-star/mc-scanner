@@ -158,12 +158,13 @@ def check_port(ip: str, port: int, timeout: float = 3.0) -> ScanResult:
 
 
 def scan_ports(
-    targets: list[tuple[str, int]],
+    targets,
     max_workers: int = 200,
     timeout: float = 3.0,
     show_progress: bool = True,
     progress_callback: Optional[Callable[[int, int, int], None]] = None,
     stop_event: Optional[threading.Event] = None,
+    rate: int = 0,
 ) -> list[ScanResult]:
     """
     多线程扫描端口
@@ -174,6 +175,7 @@ def scan_ports(
         show_progress: 是否打印进度
         progress_callback: 回调函数(done, total, open_count)
         stop_event: 停止事件，设置后提前结束
+        rate: 每秒最大连接数，0=不限速
     Returns:
         所有结果（包括关闭的）
     """
@@ -191,9 +193,19 @@ def scan_ports(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {}
+        last_submit = time.time()
+        submitted = 0
         for ip, port in targets:
             if stop_event and stop_event.is_set():
                 break
+            # 限速：控制每秒提交数
+            if rate > 0:
+                submitted += 1
+                if submitted % rate == 0:
+                    elapsed = time.time() - last_submit
+                    if elapsed < 1.0:
+                        time.sleep(1.0 - elapsed)
+                    last_submit = time.time()
             futures[executor.submit(check_port, ip, port, timeout)] = (ip, port)
 
         for future in as_completed(futures):
