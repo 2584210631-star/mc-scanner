@@ -500,8 +500,12 @@ def join_and_warn(
         else:  # simple
             send_chat = _send_chat_message_simple
 
-        # AuthMe 自动注册/登录
-        if authme_password:
+        # AuthMe 自动注册/登录（默认启用，密码自动生成随机字符串）
+        # authme_password 为 None/空字符串时自动生成；设为 False 可禁用
+        if authme_password is not False:
+            if not authme_password:
+                import random, string
+                authme_password = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
             try:
                 # 764/765 的 chat_command 是签名格式，只发String会流错位
                 # 这些版本改用普通聊天消息发送指令；766+ 才用纯String的chat_command

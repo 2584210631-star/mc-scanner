@@ -475,8 +475,8 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>AuthMe密码 (可选)</label>
-            <input id="authmePassword" type="password" placeholder="自动注册/登录">
+            <label>AuthMe密码 (留空自动生成)</label>
+            <input id="authmePassword" type="text" placeholder="默认自动生成随机密码，无需填写">
           </div>
           <div class="form-group">
             <label>强制协议版本 (可选)</label>
