@@ -1,0 +1,11 @@
+[
+  {
+    "ip": "154.201.88.8",
+    "port": 25565,
+    "version": "1.20.4",
+    "proto": 765,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "A Minecraft Server"
+  }
+]

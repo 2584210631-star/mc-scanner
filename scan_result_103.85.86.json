@@ -1,0 +1,74 @@
+[
+  {
+    "ip": "103.85.86.148",
+    "port": 25565,
+    "version": "Velocity 1.7.2-26.2",
+    "proto": 774,
+    "players_online": 10,
+    "players_max": 2026,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.86.51",
+    "port": 25570,
+    "version": "Purpur 1.21.1",
+    "proto": 767,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.86.51",
+    "port": 25573,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "鲤鱼皇帝服"
+  },
+  {
+    "ip": "103.85.86.51",
+    "port": 29139,
+    "version": "1.7.10",
+    "proto": 5,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "GT:New Horizons 2.9.0-beta-1"
+  },
+  {
+    "ip": "103.85.86.147",
+    "port": 25565,
+    "version": "Velocity 1.7.2-26.2",
+    "proto": 774,
+    "players_online": 0,
+    "players_max": 0,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.86.151",
+    "port": 25570,
+    "version": "Purpur 1.21.1",
+    "proto": 767,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.86.151",
+    "port": 29139,
+    "version": "1.7.10",
+    "proto": 5,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "GT:New Horizons 2.9.0-beta-1"
+  },
+  {
+    "ip": "103.85.86.151",
+    "port": 25573,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "鲤鱼皇帝服"
+  }
+]

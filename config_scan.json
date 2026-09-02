@@ -1,0 +1,16 @@
+{
+  "username": "herobrine",
+  "messages": [
+    "[安全提醒] 此服务器处于离线模式，任何人可冒用任意用户名登录",
+    "[安全提醒] 建议在 server.properties 中将 online-mode 设为 true"
+  ],
+  "ports": [25565, 25566, 25567, 25568, 25569, 25570, 25575, 25580, 25585, 25590, 25595, 25600, 25650, 25700, 19132, 12345, 8080, 42069, 6969],
+  "scan_threads": 300,
+  "scan_timeout": 2.0,
+  "bot_threads": 15,
+  "bot_timeout": 12,
+  "message_delay": 0.8,
+  "retry_count": 1,
+  "output_format": "json",
+  "output_file": "results.json"
+}

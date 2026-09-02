@@ -1,0 +1,46 @@
+[
+  {
+    "ip": "136.243.0.224",
+    "port": 25565,
+    "success": false,
+    "is_offline": false,
+    "messages_sent": 0,
+    "error": "online-mode (服务器要求正版验证)",
+    "protocol_version": 776,
+    "version_name": "1.21.12+~(协议776)",
+    "server_info": "{'description': 'Pwnd and Friends', 'players': {'max': 20, 'online': 0}, 'version': {'name': 'Paper 26.2', 'protocol': 776}, 'enforcesSecureChat': True}"
+  },
+  {
+    "ip": "136.243.0.92",
+    "port": 25565,
+    "success": false,
+    "is_offline": false,
+    "messages_sent": 0,
+    "error": "online-mode (服务器要求正版验证)",
+    "protocol_version": 774,
+    "version_name": "1.21.10/1.21.11",
+    "server_info": "{'version': {'protocol': 774, 'name': 'Velocity 1.7.2-26.2'}, 'players': {'online': 0, 'max': 500, 'sample': []}, 'description': {'color': '#09ADD3', 'text': 'FabLab Hamm-Westfahlen'}}"
+  },
+  {
+    "ip": "136.243.0.223",
+    "port": 25565,
+    "success": false,
+    "is_offline": false,
+    "messages_sent": 0,
+    "error": "错误: [Errno 104] Connection reset by peer",
+    "protocol_version": 774,
+    "version_name": "1.21.10/1.21.11",
+    "server_info": ""
+  },
+  {
+    "ip": "136.243.0.33",
+    "port": 25565,
+    "success": true,
+    "is_offline": true,
+    "messages_sent": 2,
+    "error": "",
+    "protocol_version": 767,
+    "version_name": "1.21/1.21.1",
+    "server_info": "{'version': {'name': '1.21', 'protocol': 767}, 'description': 'A Minecraft Server hosted on a headless machine for the first time', 'players': {'max': 20, 'online': 0}}"
+  }
+]

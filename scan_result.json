@@ -1,0 +1,13 @@
+[
+  {
+    "ip": "193.70.0.251",
+    "port": 25565,
+    "success": false,
+    "is_offline": false,
+    "messages_sent": 0,
+    "error": "online-mode (服务器要求正版验证)",
+    "protocol_version": 756,
+    "version_name": "1.17.1",
+    "server_info": "{'description': {'text': 'Minetopia'}, 'players': {'max': 20, 'online': 0}, 'version': {'name': '1.17.1', 'protocol': 756}}"
+  }
+]

@@ -1,0 +1,353 @@
+[
+  {
+    "ip": "103.85.84.25",
+    "port": 25564,
+    "version": "1.20.1",
+    "proto": 763,
+    "players_online": 114514,
+    "players_max": 37,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.84.39",
+    "port": 25564,
+    "version": "1.20.1",
+    "proto": 763,
+    "players_online": 114514,
+    "players_max": 37,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.84.40",
+    "port": 25564,
+    "version": "1.20.1",
+    "proto": 763,
+    "players_online": 114514,
+    "players_max": 37,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.84.74",
+    "port": 25564,
+    "version": "1.20.1",
+    "proto": 763,
+    "players_online": 114514,
+    "players_max": 37,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.86.51",
+    "port": 25564,
+    "version": "1.20.1",
+    "proto": 763,
+    "players_online": 114514,
+    "players_max": 37,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.86.151",
+    "port": 25564,
+    "version": "1.20.1",
+    "proto": 763,
+    "players_online": 114514,
+    "players_max": 37,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.84.22",
+    "port": 25565,
+    "version": "Purpur 26.2",
+    "proto": 776,
+    "players_online": 25,
+    "players_max": 90,
+    "motd": "Quanum Original 2"
+  },
+  {
+    "ip": "103.85.86.148",
+    "port": 25565,
+    "version": "Velocity 1.7.2-26.2",
+    "proto": 774,
+    "players_online": 10,
+    "players_max": 2026,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.84.25",
+    "port": 29144,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 6,
+    "players_max": 200000,
+    "motd": "A Minecraft Server"
+  },
+  {
+    "ip": "103.85.84.39",
+    "port": 29144,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 6,
+    "players_max": 200000,
+    "motd": "A Minecraft Server"
+  },
+  {
+    "ip": "103.85.84.40",
+    "port": 29144,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 6,
+    "players_max": 200000,
+    "motd": "A Minecraft Server"
+  },
+  {
+    "ip": "103.85.84.74",
+    "port": 29144,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 6,
+    "players_max": 200000,
+    "motd": "A Minecraft Server"
+  },
+  {
+    "ip": "103.85.86.51",
+    "port": 29144,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 6,
+    "players_max": 200000,
+    "motd": "A Minecraft Server"
+  },
+  {
+    "ip": "103.85.86.151",
+    "port": 29144,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 6,
+    "players_max": 200000,
+    "motd": "A Minecraft Server"
+  },
+  {
+    "ip": "103.85.84.25",
+    "port": 25570,
+    "version": "Purpur 1.21.1",
+    "proto": 767,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.84.25",
+    "port": 25573,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "鲤鱼皇帝服"
+  },
+  {
+    "ip": "103.85.84.25",
+    "port": 29139,
+    "version": "1.7.10",
+    "proto": 5,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "GT:New Horizons 2.9.0-beta-1"
+  },
+  {
+    "ip": "103.85.84.39",
+    "port": 25573,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "鲤鱼皇帝服"
+  },
+  {
+    "ip": "103.85.84.39",
+    "port": 25570,
+    "version": "Purpur 1.21.1",
+    "proto": 767,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.84.39",
+    "port": 29139,
+    "version": "1.7.10",
+    "proto": 5,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "GT:New Horizons 2.9.0-beta-1"
+  },
+  {
+    "ip": "103.85.84.40",
+    "port": 25573,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "鲤鱼皇帝服"
+  },
+  {
+    "ip": "103.85.84.40",
+    "port": 25562,
+    "version": "1.20.1",
+    "proto": 763,
+    "players_online": 0,
+    "players_max": 10,
+    "motd": "愿此行，终抵群星"
+  },
+  {
+    "ip": "103.85.84.40",
+    "port": 25570,
+    "version": "Purpur 1.21.1",
+    "proto": 767,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.84.40",
+    "port": 29139,
+    "version": "1.7.10",
+    "proto": 5,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "GT:New Horizons 2.9.0-beta-1"
+  },
+  {
+    "ip": "103.85.84.74",
+    "port": 25562,
+    "version": "1.20.1",
+    "proto": 763,
+    "players_online": 0,
+    "players_max": 10,
+    "motd": "愿此行，终抵群星"
+  },
+  {
+    "ip": "103.85.84.74",
+    "port": 25570,
+    "version": "Purpur 1.21.1",
+    "proto": 767,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.84.74",
+    "port": 25573,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "鲤鱼皇帝服"
+  },
+  {
+    "ip": "103.85.84.74",
+    "port": 29139,
+    "version": "1.7.10",
+    "proto": 5,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "GT:New Horizons 2.9.0-beta-1"
+  },
+  {
+    "ip": "103.85.84.126",
+    "port": 25565,
+    "version": "1.21.1",
+    "proto": 767,
+    "players_online": 0,
+    "players_max": 8,
+    "motd": "A Minecraft Server"
+  },
+  {
+    "ip": "103.85.84.250",
+    "port": 25565,
+    "version": "BungeeCord 1.8.x-1.21.x",
+    "proto": 773,
+    "players_online": 0,
+    "players_max": 5835,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.84.252",
+    "port": 25565,
+    "version": "BungeeCord 1.8.x-1.21.x",
+    "proto": 773,
+    "players_online": 0,
+    "players_max": 5835,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.85.212",
+    "port": 25565,
+    "version": "1.21.10",
+    "proto": 773,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "A Minecraft Server"
+  },
+  {
+    "ip": "103.85.86.51",
+    "port": 25570,
+    "version": "Purpur 1.21.1",
+    "proto": 767,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.86.51",
+    "port": 25573,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "鲤鱼皇帝服"
+  },
+  {
+    "ip": "103.85.86.51",
+    "port": 29139,
+    "version": "1.7.10",
+    "proto": 5,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "GT:New Horizons 2.9.0-beta-1"
+  },
+  {
+    "ip": "103.85.86.147",
+    "port": 25565,
+    "version": "Velocity 1.7.2-26.2",
+    "proto": 774,
+    "players_online": 0,
+    "players_max": 0,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.86.151",
+    "port": 25570,
+    "version": "Purpur 1.21.1",
+    "proto": 767,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": ""
+  },
+  {
+    "ip": "103.85.86.151",
+    "port": 25573,
+    "version": "1.21.11",
+    "proto": 774,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "鲤鱼皇帝服"
+  },
+  {
+    "ip": "103.85.86.151",
+    "port": 29139,
+    "version": "1.7.10",
+    "proto": 5,
+    "players_online": 0,
+    "players_max": 20,
+    "motd": "GT:New Horizons 2.9.0-beta-1"
+  }
+]
