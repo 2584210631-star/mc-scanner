@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛡️ MC Scanner v3
+# 🛡️ MC Scanner v1
 
 ### Minecraft 服务器扫描与安全提醒机器人
 
