@@ -242,7 +242,10 @@ class MCConnection:
         self.sock.sendall(frame)
 
     def recv_packet(self, timeout: float | None = None) -> tuple:
-        """接收一个数据包，返回 (packet_id, payload_bytes)"""
+        """接收一个数据包，返回 (packet_id, payload_bytes)
+        读包数据中途失败（半包）时关闭连接，避免后续流错位；
+        仅等待数据时的正常超时不关闭连接（调用方用于轮询）
+        """
         if self.sock is None:
             raise ConnectionError("未连接")
 
@@ -251,10 +254,18 @@ class MCConnection:
 
         try:
             packet_length = self._recv_varint()
-            raw = self._recv_exact(packet_length)
+            try:
+                raw = self._recv_exact(packet_length)
+            except Exception:
+                # 已读到包长度但数据没读完（半包），关闭连接避免流错位
+                self.close()
+                raise
         finally:
-            if timeout is not None:
-                self.sock.settimeout(self.timeout)
+            if timeout is not None and self.sock is not None:
+                try:
+                    self.sock.settimeout(self.timeout)
+                except Exception:
+                    pass
 
         if self.compression_threshold >= 0:
             buf = io.BytesIO(raw)

@@ -87,8 +87,10 @@ class BotResult:
     authme_used: bool = False
 
 
-def _build_client_information() -> bytes:
-    """构建 Client Information 包（configuration 阶段）"""
+def _build_client_information(protocol_version: int = 767) -> bytes:
+    """构建 Client Information 包（configuration 阶段）
+    1.21.2+ (协议768+) 增加 particleStatus 字段
+    """
     buf = bytearray()
     buf += write_string("en_us")              # locale
     buf += struct.pack("b", 8)                 # view distance
@@ -98,13 +100,15 @@ def _build_client_information() -> bytes:
     buf += write_varint(1)                     # main hand (1 = right)
     buf += struct.pack("?", False)             # enable text filtering
     buf += struct.pack("?", True)              # allow server listings
+    if protocol_version >= 769:
+        buf += write_varint(0)                 # particleStatus (0 = all, 1.21.4+)
     return bytes(buf)
 
 
-def _send_chat_message_new(conn: MCConnection, message: str, chat_id: int):
+def _send_chat_message_new(conn: MCConnection, message: str, chat_id: int, protocol_version: int = 774):
     """
     发送聊天消息（1.20.5+ 新格式，协议 766+）
-    格式基于 MCPyBot 实测验证
+    checksum 字段 1.21.5(770) 才加入，766-769 不需要
     """
     timestamp = int(time.time() * 1000)
     salt = 0
@@ -114,12 +118,13 @@ def _send_chat_message_new(conn: MCConnection, message: str, chat_id: int):
         + struct.pack(">q", salt)
         + write_varint(0)           # message count: 0
         + b'\x00\x00\x00'           # acknowledged: 20-bit fixed bitset (3 bytes)
-        + b'\x00'                   # checksum: 0
     )
+    if protocol_version >= 770:
+        payload += b'\x00'           # checksum: 0 (1.21.5+)
     conn.send_packet(chat_id, payload)
 
 
-def _send_chat_message_759(conn: MCConnection, message: str, chat_id: int):
+def _send_chat_message_759(conn: MCConnection, message: str, chat_id: int, protocol_version: int = 759):
     """
     发送聊天消息（1.19，协议 759）
     格式: String + Long(timestamp) + Long(salt) + Boolean(hasSignature) + Boolean(hasSignedPreview)
@@ -136,7 +141,7 @@ def _send_chat_message_759(conn: MCConnection, message: str, chat_id: int):
     conn.send_packet(chat_id, payload)
 
 
-def _send_chat_message_760(conn: MCConnection, message: str, chat_id: int):
+def _send_chat_message_760(conn: MCConnection, message: str, chat_id: int, protocol_version: int = 760):
     """
     发送聊天消息（1.19.1/1.19.2，协议 760）
     格式: String + Long(timestamp) + Long(salt) + Boolean(hasSignature)
@@ -155,7 +160,7 @@ def _send_chat_message_760(conn: MCConnection, message: str, chat_id: int):
     conn.send_packet(chat_id, payload)
 
 
-def _send_chat_message_761(conn: MCConnection, message: str, chat_id: int):
+def _send_chat_message_761(conn: MCConnection, message: str, chat_id: int, protocol_version: int = 761):
     """
     发送聊天消息（1.19.3-1.20.4，协议 761-765）
     格式: String + Long(timestamp) + Long(salt) + Boolean(hasSignature)
@@ -174,7 +179,7 @@ def _send_chat_message_761(conn: MCConnection, message: str, chat_id: int):
     conn.send_packet(chat_id, payload)
 
 
-def _send_chat_message_simple(conn: MCConnection, message: str, chat_id: int):
+def _send_chat_message_simple(conn: MCConnection, message: str, chat_id: int, protocol_version: int = 340):
     """
     发送聊天消息（1.18及以下纯String格式，协议 < 759）
     """
@@ -402,7 +407,7 @@ def join_and_warn(
             sb_rp = cfg.get("sb_resource_pack", CONFIG_SB_RESOURCE_PACK_RESPONSE)
 
             # 发送 Client Information
-            conn.send_packet(sb_client_info, _build_client_information())
+            conn.send_packet(sb_client_info, _build_client_information(protocol_version))
 
             # 发送 brand
             brand_payload = write_string("minecraft:brand") + write_string("MCScanner")
@@ -439,8 +444,12 @@ def join_and_warn(
 
                 elif packet_id == cb_add_rp:
                     # 资源包，回复 accepted (3)
-                    rp_uuid = read_uuid_from_stream(buf)
-                    response = write_uuid(rp_uuid) + write_varint(3)
+                    # 764 只有 result，UUID 是 765+ 才引入的
+                    if protocol_version >= 765:
+                        rp_uuid = read_uuid_from_stream(buf)
+                        response = write_uuid(rp_uuid) + write_varint(3)
+                    else:
+                        response = write_varint(3)
                     conn.send_packet(sb_rp, response)
 
                 elif packet_id == cb_disconnect:
@@ -494,25 +503,27 @@ def join_and_warn(
         # AuthMe 自动注册/登录
         if authme_password:
             try:
+                # 764/765 的 chat_command 是签名格式，只发String会流错位
+                # 这些版本改用普通聊天消息发送指令；766+ 才用纯String的chat_command
+                use_cmd = "sb_chat_command" in packets and protocol_version >= 766
                 cmd_id = packets.get("sb_chat_command", packets["sb_chat"])
-                use_cmd = "sb_chat_command" in packets
                 # 先尝试登录（可能已注册）
                 if use_cmd:
                     _send_chat_command(conn, f"/login {authme_password}", cmd_id)
                 else:
-                    send_chat(conn, f"/login {authme_password}", packets["sb_chat"])
+                    send_chat(conn, f"/login {authme_password}", packets["sb_chat"], protocol_version)
                 time.sleep(0.5)
                 # 再尝试注册（新账号）
                 if use_cmd:
                     _send_chat_command(conn, f"/register {authme_password} {authme_password}", cmd_id)
                 else:
-                    send_chat(conn, f"/register {authme_password} {authme_password}", packets["sb_chat"])
+                    send_chat(conn, f"/register {authme_password} {authme_password}", packets["sb_chat"], protocol_version)
                 time.sleep(1.0)
                 # 再登录一次确保生效
                 if use_cmd:
                     _send_chat_command(conn, f"/login {authme_password}", cmd_id)
                 else:
-                    send_chat(conn, f"/login {authme_password}", packets["sb_chat"])
+                    send_chat(conn, f"/login {authme_password}", packets["sb_chat"], protocol_version)
                 time.sleep(0.5)
                 result.authme_used = True
             except Exception:
@@ -522,7 +533,7 @@ def join_and_warn(
         sent = 0
         for msg in messages:
             try:
-                send_chat(conn, msg, packets["sb_chat"])
+                send_chat(conn, msg, packets["sb_chat"], protocol_version)
                 sent += 1
                 time.sleep(message_delay)
             except Exception as e:
