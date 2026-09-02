@@ -13,6 +13,50 @@ import uuid
 import zlib
 import time
 
+# 自动生成的协议表（延迟加载，第一次调用 get_play_packets 时初始化）
+_AUTO_TABLES = None
+_AUTO_LOADED = False
+
+
+def _load_auto_tables():
+    """尝试加载 packets_auto.py 生成的协议表，转换为内部格式"""
+    global _AUTO_TABLES, _AUTO_LOADED
+    if _AUTO_LOADED:
+        return _AUTO_TABLES
+    _AUTO_LOADED = True
+    try:
+        from packets_auto import PACKET_TABLES_AUTO
+        ver_to_proto = {v: k for k, v in PROTOCOL_TO_VERSION.items()}
+        auto_play = {}
+        for ver_name, stages in PACKET_TABLES_AUTO.items():
+            proto = ver_to_proto.get(ver_name)
+            if proto is None:
+                continue
+            play = stages.get('play', {})
+            sb = play.get('toServer', {})
+            cb = play.get('toClient', {})
+            auto_play[proto] = {
+                'min_proto': proto, 'max_proto': proto,
+                'sb_chat': sb.get('chat', sb.get('chat_message')),
+                'sb_chat_command': sb.get('chat_command', sb.get('chat_command_signed')),
+                'cb_keep_alive': cb.get('keep_alive'),
+                'sb_keep_alive': sb.get('keep_alive'),
+                'cb_ping': cb.get('ping', cb.get('ping_pong')),
+                'sb_pong': sb.get('pong', sb.get('ping_pong')),
+                'cb_login': cb.get('login', cb.get('join_game')),
+                'chat_format': 'new' if proto >= 766 else ('old_signed_761' if proto >= 761 else ('old_signed_760' if proto >= 760 else ('old_signed_759' if proto >= 759 else 'simple'))),
+                'has_configuration': proto >= 764,
+                'login_start_uuid': proto >= 764,
+                'uuid_is_string': proto <= 578,
+            }
+        _AUTO_TABLES = auto_play
+        print(f"[mc_protocol] 已加载自动生成协议表: {len(auto_play)} 个版本")
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[mc_protocol] 自动协议表加载失败: {e}")
+    return _AUTO_TABLES
+
 
 # ============================================================
 # 协议常量 (Protocol 774 = Minecraft 1.21.11)
@@ -774,9 +818,19 @@ PLAY_PACKET_TABLES = [
 
 
 def get_play_packets(protocol_version: int) -> dict | None:
-    """根据协议版本获取配置表，不支持的版本返回 None"""
+    """根据协议版本获取配置表，不支持的版本返回 None
+    优先使用自动生成的协议表(packets_auto.py)，不存在则用手写表
+    """
     if protocol_version < MIN_SUPPORTED_PROTOCOL:
         return None
+    # 优先用自动生成的协议表
+    auto = _load_auto_tables()
+    if auto and protocol_version in auto:
+        table = auto[protocol_version]
+        # 检查关键字段是否齐全，不齐全则回退手写表
+        if table.get('sb_chat') and table.get('cb_keep_alive'):
+            return table
+    # 回退到手写表
     for table in PLAY_PACKET_TABLES:
         if table["min_proto"] <= protocol_version <= table["max_proto"]:
             return table

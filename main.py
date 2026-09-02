@@ -20,7 +20,7 @@ import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from scanner import parse_targets, scan_ports, get_open_ports, deduplicate_targets, parse_port_spec
+from scanner import parse_targets, scan_ports, get_open_ports, deduplicate_targets, parse_port_spec, count_targets
 from bot import join_and_warn, DEFAULT_WARNING_MESSAGES
 from mc_protocol import server_list_ping, get_version_name
 

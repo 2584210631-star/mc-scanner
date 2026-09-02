@@ -55,28 +55,22 @@ def parse_port_spec(spec: str) -> list[int]:
 MAX_TARGETS = 2_000_000  # 防止大网段 OOM
 
 
-def parse_targets(targets: list[str], default_ports: list[int] | None = None) -> list[tuple[str, int]]:
+def parse_targets(targets: list[str], default_ports: list[int] | None = None):
     """
-    解析目标列表，支持以下格式：
-    - 单个 IP: "192.168.1.1"
-    - IP:端口: "192.168.1.1:25566"
-    - CIDR 网段: "192.168.1.0/24"
-    - CIDR:端口: "192.168.1.0/24:25566"
-    - 主机名: "example.com"
-    - 主机名:端口: "example.com:25566"
+    解析目标列表（惰性生成器，不物化，避免大网段OOM）
+    支持格式：单个IP、IP:端口、CIDR网段、CIDR:端口、主机名、主机名:端口
     如果目标不带端口，使用 default_ports 展开
-    返回 (ip, port) 列表（超过 MAX_TARGETS 会截断并警告）
+    超过 MAX_TARGETS 的目标会跳过并警告
     """
     if default_ports is None:
         default_ports = [25565]
 
-    results = []
+    count = 0
     for target in targets:
         target = target.strip()
         if not target or target.startswith('#'):
             continue
 
-        # 检查是否包含端口（最后一段是数字）
         addr_part = target
         port = None
         if target.count(':') == 1:
@@ -85,34 +79,63 @@ def parse_targets(targets: list[str], default_ports: list[int] | None = None) ->
                 addr_part = parts[0]
                 port = int(parts[1])
 
-        # 尝试解析为 CIDR 或 IP
         try:
             network = ipaddress.ip_network(addr_part, strict=False)
             num_hosts = network.num_addresses - 2 if network.num_addresses > 2 else 1
             est = num_hosts * (1 if port else len(default_ports))
-            if len(results) + est > MAX_TARGETS:
-                print(f"[!] 目标 {target} 约 {est} 个，超过上限 {MAX_TARGETS}，已跳过（请缩小网段）")
+            if count + est > MAX_TARGETS:
+                print(f"[!] 目标 {target} 约 {est} 个，超过上限 {MAX_TARGETS}，已跳过（请缩小网段或用连续扫描模式）")
                 continue
-            # 直接迭代，不物化整个列表，避免大网段中间占用
             hosts = network.hosts() if network.num_addresses > 2 else [network.network_address]
             for ip in hosts:
                 if port is not None:
-                    results.append((str(ip), port))
+                    count += 1
+                    yield (str(ip), port)
                 else:
                     for p in default_ports:
-                        results.append((str(ip), p))
+                        count += 1
+                        yield (str(ip), p)
         except ValueError:
-            # 不是 CIDR/IP，当作主机名
             try:
                 resolved = socket.gethostbyname(addr_part)
                 if port is not None:
-                    results.append((resolved, port))
+                    count += 1
+                    yield (resolved, port)
                 else:
                     for p in default_ports:
-                        results.append((resolved, p))
+                        count += 1
+                        yield (resolved, p)
             except socket.gaierror:
                 print(f"[!] 无法解析: {addr_part}")
-    return results
+
+
+def count_targets(targets: list[str], default_ports: list[int] | None = None) -> int:
+    """快速估算目标总数（不物化，只计数）"""
+    if default_ports is None:
+        default_ports = [25565]
+    count = 0
+    for target in targets:
+        target = target.strip()
+        if not target or target.startswith('#'):
+            continue
+        addr_part = target
+        port = None
+        if target.count(':') == 1:
+            parts = target.rsplit(':', 1)
+            if parts[1].isdigit():
+                addr_part = parts[0]
+                port = int(parts[1])
+        try:
+            network = ipaddress.ip_network(addr_part, strict=False)
+            num_hosts = network.num_addresses - 2 if network.num_addresses > 2 else 1
+            count += num_hosts * (1 if port else len(default_ports))
+        except ValueError:
+            try:
+                socket.gethostbyname(addr_part)
+                count += 1 if port else len(default_ports)
+            except socket.gaierror:
+                pass
+    return min(count, MAX_TARGETS)
 
 
 def check_port(ip: str, port: int, timeout: float = 3.0) -> ScanResult:
@@ -155,6 +178,9 @@ def scan_ports(
         所有结果（包括关闭的）
     """
     results = []
+    # 生成器转列表（ThreadPoolExecutor需要知道所有任务）
+    # 大网段建议用连续扫描模式拆/24逐个扫
+    targets = list(targets)
     total = len(targets)
     done = 0
     open_count = 0
@@ -245,3 +271,107 @@ def filter_excluded(targets: list, exclude_networks: list) -> list:
             pass  # 域名等非IP，不排除
         filtered.append((ip, port))
     return filtered
+
+
+def has_masscan() -> bool:
+    """检测系统是否安装了 masscan"""
+    import shutil
+    return shutil.which('masscan') is not None
+
+
+def masscan_scan(
+    targets: list[str],
+    ports: list[int],
+    rate: int = 1000,
+    timeout: int = 10,
+) -> list[tuple[str, int]]:
+    """
+    使用 masscan 高速扫描端口（需要 root 权限）
+    返回开放的 (ip, port) 列表
+    """
+    import subprocess
+    import tempfile
+    import os
+
+    if not has_masscan():
+        raise RuntimeError("masscan 未安装")
+
+    # 把目标转成 masscan 格式（去掉端口）
+    target_list = []
+    for t in targets:
+        t = t.strip()
+        if ':' in t:
+            t = t.rsplit(':', 1)[0]
+        target_list.append(t)
+
+    port_str = ','.join(str(p) for p in ports)
+    target_str = ' '.join(target_list)
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        output_file = f.name
+
+    try:
+        cmd = [
+            'masscan', target_str,
+            '-p', port_str,
+            '--rate', str(rate),
+            '--wait', str(timeout),
+            '-oJ', output_file,
+        ]
+        print(f"[*] 使用 masscan 扫描: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 30)
+        if result.returncode != 0 and result.stderr:
+            print(f"[!] masscan 警告: {result.stderr[:200]}")
+
+        # 解析 masscan 输出
+        open_ports = []
+        try:
+            with open(output_file, 'r') as f:
+                content = f.read().strip()
+                if content:
+                    # masscan 输出可能是 JSON 数组，也可能最后有个逗号
+                    if content.endswith(','):
+                        content = content[:-1]
+                    if not content.startswith('['):
+                        content = '[' + content + ']'
+                    data = json.loads(content)
+                    for entry in data:
+                        ip = entry.get('ip')
+                        for port_info in entry.get('ports', []):
+                            if port_info.get('status') == 'open':
+                                open_ports.append((ip, port_info['port']))
+        except (json.JSONDecodeError, FileNotFoundError) as e:
+            print(f"[!] 解析 masscan 输出失败: {e}")
+
+        return open_ports
+    finally:
+        if os.path.exists(output_file):
+            os.unlink(output_file)
+
+
+def scan_ports_auto(
+    targets: list[str],
+    ports: list[int],
+    max_workers: int = 200,
+    timeout: float = 2.5,
+    use_masscan: bool = True,
+    masscan_rate: int = 1000,
+    progress_callback=None,
+    stop_event=None,
+) -> list[tuple[str, int]]:
+    """
+    自动选择扫描方式：有 masscan 且允许则用 masscan，否则用 Python socket
+    返回开放的 (ip, port) 列表
+    """
+    if use_masscan and has_masscan():
+        try:
+            return masscan_scan(targets, ports, rate=masscan_rate, timeout=int(timeout))
+        except Exception as e:
+            print(f"[!] masscan 失败({e})，回退 Python 扫描")
+
+    # 回退 Python 扫描
+    target_list = list(parse_targets(targets, ports))
+    results = scan_ports(target_list, max_workers=max_workers, timeout=timeout,
+                         show_progress=True, progress_callback=progress_callback,
+                         stop_event=stop_event)
+    return get_open_ports(results)
