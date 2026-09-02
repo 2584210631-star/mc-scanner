@@ -608,11 +608,12 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
             </select>
             <button class="btn btn-sm" style="background:var(--bg3);color:var(--text2)" onclick="exportJSON()">导出JSON</button>
             <button class="btn btn-sm" style="background:var(--bg3);color:var(--text2)" onclick="exportCSV()">导出CSV</button>
+            <button class="btn btn-sm" id="batchWarnBtn" style="background:#f59e0b;color:#fff;border:none" onclick="batchWarn()">⚡ 对当前列表发警告</button>
           </div>
           <div class="table-wrap">
             <table>
               <thead><tr>
-                <th>IP:端口</th><th>版本</th><th>人数</th><th>状态</th><th>消息</th><th>MOTD</th>
+                <th>IP:端口</th><th>版本</th><th>人数</th><th>状态</th><th>消息</th><th>MOTD</th><th>操作</th>
               </tr></thead>
               <tbody id="resultsBody"></tbody>
             </table>
@@ -752,6 +753,79 @@ function pollState(){
   });
 }
 
+function warnSingle(ip, port, btn){
+  if(!confirm('对 '+ip+':'+port+' 发送警告?'))return;
+  if(btn){btn.disabled=true; btn.textContent='发送中...'; btn.style.background='#94a3b8';}
+  const cfg = getCfg();
+  cfg.target = ip+':'+port;
+  fetch('/api/quick', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)})
+  .then(r=>r.json()).then(res=>{
+    if(res.success){
+      alert('警告成功! 发送了 '+res.messages_sent+' 条消息');
+      currentResults.forEach(r=>{
+        if(r.ip===ip && r.port===port){
+          r.success = true; r.messages_sent = res.messages_sent; r.is_offline = true;
+          r.auth_mode = res.auth_mode || 'offline';
+        }
+      });
+    } else {
+      alert('警告失败: '+(res.error||'未知错误'));
+    }
+    renderResults();
+  }).catch(e=>{alert('请求失败: '+e); renderResults();});
+}
+
+function batchWarn(){
+  // 获取当前筛选后的列表
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const filter = document.getElementById('filterSelect').value;
+  let list = currentResults.filter(r=>{
+    if(filter==='offline'&&!r.is_offline)return false;
+    if(filter==='success'&&!(r.success&&r.messages_sent>0))return false;
+    if(filter==='failed'&&r.success&&r.messages_sent>0)return false;
+    if(filter==='hasPlayers'&&!(r.players_online>0))return false;
+    if(search){
+      const hay = (r.ip+':'+r.port+' '+(r.version_name||'')+' '+(r.motd||'')).toLowerCase();
+      if(!hay.includes(search))return false;
+    }
+    return true;
+  });
+  // 只对还没发过警告的、SLP成功的服务器发
+  const targets = list.filter(r=>r.slp_ok && !(r.success&&r.messages_sent>0));
+  if(targets.length===0){alert('当前列表没有可警告的服务器（需要先扫描，且排除已发送的）');return;}
+  if(!confirm('将对 '+targets.length+' 台服务器发送警告，确定?'))return;
+  const btn = document.getElementById('batchWarnBtn');
+  btn.disabled = true; btn.textContent = '发送中 0/'+targets.length;
+  let done = 0, ok = 0;
+  const cfg = getCfg();
+  // 串行发送，避免并发过高被封
+  function sendNext(){
+    if(done>=targets.length){
+      btn.disabled = false; btn.textContent = '⚡ 对当前列表发警告';
+      alert('批量警告完成! 成功 '+ok+'/'+targets.length);
+      renderResults();
+      return;
+    }
+    const r = targets[done];
+    cfg.target = r.ip+':'+r.port;
+    fetch('/api/quick', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)})
+    .then(res=>res.json()).then(res=>{
+      done++;
+      if(res.success){
+        ok++;
+        currentResults.forEach(x=>{
+          if(x.ip===r.ip && x.port===r.port){
+            x.success=true; x.messages_sent=res.messages_sent; x.is_offline=true;
+          }
+        });
+      }
+      btn.textContent = '发送中 '+done+'/'+targets.length+' (成功'+ok+')';
+      setTimeout(sendNext, 500);
+    }).catch(()=>{done++; btn.textContent='发送中 '+done+'/'+targets.length; setTimeout(sendNext,500);});
+  }
+  sendNext();
+}
+
 function renderResults(){
   const search = document.getElementById('searchInput').value.toLowerCase();
   const filter = document.getElementById('filterSelect').value;
@@ -767,7 +841,7 @@ function renderResults(){
     return true;
   });
   const tbody = document.getElementById('resultsBody');
-  if(list.length===0){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:30px">暂无数据</td></tr>';return;}
+  if(list.length===0){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:30px">暂无数据</td></tr>';return;}
   tbody.innerHTML = list.slice(0,200).map(r=>{
     let badge='';
     if(r.success&&r.messages_sent>0)badge='<span class="badge badge-ok">已发送</span>';
@@ -781,6 +855,7 @@ function renderResults(){
       '<td>'+badge+'</td>'+
       '<td>'+(r.messages_sent||0)+'</td>'+
       '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.motd||'')+'">'+esc((r.motd||'').substring(0,40))+'</td>'+
+      '<td><button class="btn btn-sm btn-warn" onclick="warnSingle(\''+esc(r.ip)+'\','+r.port+',this)" style="padding:3px 8px;font-size:11px;background:#f59e0b;color:#fff;border:none;border-radius:4px;cursor:pointer">警告</button></td>'+
     '</tr>';
   }).join('');
 }
