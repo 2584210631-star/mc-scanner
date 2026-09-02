@@ -110,7 +110,7 @@ def _build_client_information(protocol_version: int = 767) -> bytes:
 def _send_chat_message_new(conn: MCConnection, message: str, chat_id: int, protocol_version: int = 774):
     """
     发送聊天消息（1.20.5+ 新格式，协议 766+）
-    checksum 字段 1.21.5(770) 才加入，766-769 不需要
+    checksum 字段所有版本都需要（实测1.21.1不加会被服务器静默丢弃）
     """
     timestamp = int(time.time() * 1000)
     salt = 0
@@ -118,11 +118,10 @@ def _send_chat_message_new(conn: MCConnection, message: str, chat_id: int, proto
         write_string(message[:256])
         + struct.pack(">q", timestamp)
         + struct.pack(">q", salt)
-        + write_varint(0)           # message count: 0
+        + write_varint(0)           # signature count: 0
         + b'\x00\x00\x00'           # acknowledged: 20-bit fixed bitset (3 bytes)
+        + b'\x00'                   # checksum: 0 (所有版本都需要)
     )
-    if protocol_version >= 770:
-        payload += b'\x00'           # checksum: 0 (1.21.5+)
     conn.send_packet(chat_id, payload)
 
 
