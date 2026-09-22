@@ -1,100 +1,67 @@
-import sys, time, threading
+"""并发机器人压力测试（pytest 版）。
+
+原脚本直接对公网真实服务器（103.85.86.51:41543）发起 15 个真实登录，
+已改为本地 Mock 服务器，避免对未授权目标发起真实连接。
+"""
+import sys
+import threading
+
 sys.path.insert(0, '.')
 from bot import join_and_warn
 from mc_protocol import server_list_ping
+from test_mock_server import MockServer
 
-TARGET_IP = "103.85.86.51"
-TARGET_PORT = 41543
-BOT_COUNT = 15
+BOT_COUNT = 3
+MESSAGE = "concurrency test message"
 
-# 英文警告消息
-WARNING_MESSAGES = [
-    "WARNING: This server is running in offline/insecure mode!",
-    "Your account can be impersonated by anyone.",
-    "Please set online-mode=true in server.properties to protect players.",
-    "This is a security reminder from MC Scanner.",
-]
 
-results = []
-lock = threading.Lock()
+def test_concurrent_bots():
+    """多个机器人并发对 mock 774 登录发消息，断言有成功且消息送达"""
+    srv = MockServer('127.0.0.1', 0)
+    srv.start()
+    port = srv.port
 
-def bot_worker(bot_id):
-    username = f"SecBot{bot_id:02d}"
-    try:
-        result = join_and_warn(
-            TARGET_IP, TARGET_PORT,
-            username=username,
-            messages=WARNING_MESSAGES,
-            timeout=15
+    # 每台服务器连接（SLP + 登录）由一个独立线程处理，模拟真实并发
+    handlers = []
+    for _ in range(BOT_COUNT * 2 + 2):
+        th = threading.Thread(
+            target=lambda: srv.accept_and_handle(max_connections=1), daemon=True
         )
-        with lock:
-            results.append({
-                'id': bot_id,
-                'username': username,
-                'success': result.success,
-                'offline': result.is_offline,
-                'auth_mode': result.auth_mode,
-                'sent': result.messages_sent,
-                'version': result.version_name,
-                'error': result.error,
-            })
-            status = "✓" if result.success else "✗"
-            print(f"  [{status}] {username}: sent={result.messages_sent}, mode={result.auth_mode}" + 
-                  (f", error={result.error[:50]}" if result.error else ""))
-    except Exception as e:
-        with lock:
-            results.append({
-                'id': bot_id, 'username': username,
-                'success': False, 'error': str(e)[:100]
-            })
-            print(f"  [✗] {username}: exception={str(e)[:80]}")
+        handlers.append(th)
+        th.start()
 
-# 先探测服务器
-print(f"[*] 探测 {TARGET_IP}:{TARGET_PORT}...")
-info = server_list_ping(TARGET_IP, TARGET_PORT, timeout=5)
-if info:
-    v = info.get('version', {})
-    p = info.get('players', {})
-    print(f"[*] 版本: {v.get('name','?')} (协议{v.get('protocol','?')})")
-    print(f"[*] 在线: {p.get('online',0)}/{p.get('max',0)}")
-else:
-    print("[!] SLP 探测失败，继续尝试登录...")
+    try:
+        info = server_list_ping('127.0.0.1', port, timeout=5, protocol_version=774)
+        assert info, "SLP 探测 mock 失败"
 
-print(f"\n[*] 启动 {BOT_COUNT} 个机器人并发登录...")
-print("=" * 60)
+        results = []
+        lock = threading.Lock()
 
-start = time.time()
-threads = []
-for i in range(1, BOT_COUNT + 1):
-    t = threading.Thread(target=bot_worker, args=(i,))
-    threads.append(t)
-    t.start()
-    time.sleep(0.3)  # 错开启动，避免同时连
+        def bot_worker(i):
+            try:
+                r = join_and_warn(
+                    '127.0.0.1', port,
+                    username=f"Bot{i:02d}", messages=[MESSAGE], timeout=15,
+                    protocol_version=774,
+                )
+                with lock:
+                    results.append(r.success)
+            except Exception:
+                with lock:
+                    results.append(False)
 
-for t in threads:
-    t.join(timeout=30)
+        threads = [
+            threading.Thread(target=bot_worker, args=(i,))
+            for i in range(BOT_COUNT)
+        ]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join(timeout=40)
 
-elapsed = time.time() - start
-print("=" * 60)
-print(f"\n[*] 完成! 耗时: {elapsed:.1f}秒")
-
-success = sum(1 for r in results if r['success'])
-failed = BOT_COUNT - success
-total_sent = sum(r.get('sent', 0) for r in results)
-
-print(f"\n[*] 统计:")
-print(f"  成功: {success}/{BOT_COUNT}")
-print(f"  失败: {failed}/{BOT_COUNT}")
-print(f"  总发送消息数: {total_sent}")
-
-if success > 0:
-    print(f"\n[*] 成功的机器人:")
-    for r in results:
-        if r['success']:
-            print(f"  ✓ {r['username']}: 发送{r['sent']}条, 版本={r.get('version','?')}")
-
-if failed > 0:
-    print(f"\n[!] 失败的机器人:")
-    for r in results:
-        if not r['success']:
-            print(f"  ✗ {r['username']}: {r.get('error','未知错误')[:80]}")
+        assert results, "没有任何并发结果产生"
+        assert sum(results) >= 1, f"并发 bot 全部失败: {results}"
+        assert any(MESSAGE in m for m in srv.received_messages), \
+            f"mock 未收到任何消息: {srv.received_messages}"
+    finally:
+        srv.stop()

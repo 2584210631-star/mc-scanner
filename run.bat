@@ -1,8 +1,8 @@
 @echo off
 chcp 65001 >nul 2>&1
-title MC Scanner v3
+title MC Scanner v1
 echo ========================================
-echo   MC Scanner v3 - Web Control Panel
+echo   MC Scanner v1 - Web Control Panel
 echo ========================================
 echo.
 echo Starting web panel at http://127.0.0.1:8080

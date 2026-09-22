@@ -17,6 +17,9 @@ scan_*.csv
 *_full.json
 *_servers.json
 all_open_ports.txt
+# 扫描结果导出为 txt 列表时同样禁止入库（如 简幻欢服务器列表.txt）
+*列表*.txt
+*服务器列表*.txt
 *.db
 *.db-journal
 *.db-wal

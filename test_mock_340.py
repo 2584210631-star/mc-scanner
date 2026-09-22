@@ -33,12 +33,13 @@ def recv_pkt(stream, comp=-1):
     buf = io.BytesIO(dec)
     return read_varint_from_stream(buf), buf.read()
 
-def run():
+def run(port=25567):
+    all_msgs = []
     srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(('127.0.0.1', 25567)); srv.listen(1); srv.settimeout(20)
-    print("[MOCK340] 启动在 25567 (协议340=1.12.2)")
+    srv.bind(('127.0.0.1', port)); srv.listen(1); srv.settimeout(20)
+    print(f"[MOCK340] 启动在 {port} (协议340=1.12.2)")
 
-    for _ in range(3):
+    for _ in range(5):
         try: client, _ = srv.accept()
         except: break
         st = S(client); comp = -1
@@ -88,11 +89,55 @@ def run():
                         print(f"[MOCK340] 其他包: 0x{pid:02x}")
                 except: break
             print(f"[MOCK340] 完成，收到 {len(msgs)} 条: {msgs}")
+            all_msgs.extend(msgs)
         except Exception as e:
             print(f"[MOCK340] 错误: {e}")
         finally:
             client.close()
     srv.close()
+    return all_msgs
+
+def _free_port():
+    s = socket.socket()
+    s.bind(('127.0.0.1', 0))
+    p = s.getsockname()[1]
+    s.close()
+    return p
+
+
+def test_e2e_340():
+    """端到端：对 mock 340 (1.12.2) 跑 SLP 探测 + 登录 + 发消息，并断言结果"""
+    import threading
+
+    from mc_protocol import server_list_ping
+    from bot import join_and_warn
+
+    port = _free_port()
+    holder = []
+    t = threading.Thread(target=lambda: holder.append(run(port=port)), daemon=True)
+    t.start()
+
+    info = None
+    for _ in range(20):
+        info = server_list_ping('127.0.0.1', port, timeout=2, protocol_version=340)
+        if info:
+            break
+        time.sleep(0.3)
+    assert info, "SLP 探测 mock 340 失败"
+    assert info['version']['protocol'] == 340
+
+    res = join_and_warn(
+        '127.0.0.1', port,
+        username='PytestBot', messages=['hello pytest 340'], timeout=15,
+        protocol_version=340,
+    )
+    assert res.success, res.error
+    assert res.messages_sent >= 1
+    t.join(timeout=5)
+    if holder:
+        assert any('hello pytest 340' in m for m in holder[0]), \
+            f"mock 未收到消息: {holder[0]}"
+
 
 if __name__ == '__main__':
     run()

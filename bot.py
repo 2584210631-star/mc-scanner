@@ -338,9 +338,9 @@ def join_and_warn(
             # ===== 连接 =====
             conn.connect()
 
-            # ===== 握手 (state=2 login)，用服务器的协议版本 =====
+            # ===== 握手 (state=2 login)，用当前候选协议版本 =====
             handshake_data = (
-                write_varint(protocol_version)
+                write_varint(_proto)
                 + write_string(host)
                 + struct.pack(">H", port)
                 + write_varint(2)  # next state: Login

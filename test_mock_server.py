@@ -48,6 +48,7 @@ class MockServer:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((self.host, self.port))
+        self.port = self.sock.getsockname()[1]  # port=0 时取实际分配端口
         self.sock.listen(1)
         self.sock.settimeout(30)
         self.running = True
@@ -247,6 +248,37 @@ class MockServer:
                 break
 
         print(f"[MOCK] Play 阶段结束，收到 {messages_received} 条聊天消息")
+
+
+def test_e2e_774():
+    """端到端：对 mock 774 服务器跑 SLP 探测 + 登录 + 发消息，并断言结果"""
+    import threading
+
+    from mc_protocol import server_list_ping
+    from bot import join_and_warn
+
+    srv = MockServer('127.0.0.1', 0)
+    srv.start()
+    t = threading.Thread(
+        target=lambda: srv.accept_and_handle(max_connections=5), daemon=True
+    )
+    t.start()
+    try:
+        info = server_list_ping('127.0.0.1', srv.port, timeout=5, protocol_version=774)
+        assert info, "SLP 探测 mock 774 失败"
+        assert info['version']['protocol'] == 774
+
+        res = join_and_warn(
+            '127.0.0.1', srv.port,
+            username='PytestBot', messages=['hello pytest 774'], timeout=15,
+            protocol_version=774,
+        )
+        assert res.success, res.error
+        assert res.messages_sent >= 1
+        assert any('hello pytest 774' in m for m in srv.received_messages), \
+            f"mock 未收到消息: {srv.received_messages}"
+    finally:
+        srv.stop()
 
 
 if __name__ == '__main__':
