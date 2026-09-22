@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# 扫描结果
+result*.json
+result*.csv
+scan_*.json
+scan_*.csv
+*_result*.json
+*_full.json
+*_servers.json
+all_open_ports.txt
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# 配置（保留示例，忽略个人配置）
+config.local.json
+config.json
+config_*.json
+!config.example.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
